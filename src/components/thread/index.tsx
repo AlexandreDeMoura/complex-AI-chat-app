@@ -3,12 +3,49 @@ import { ArrowUp, PanelRightClose, SquarePen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TooltipIconButton } from '@/components/thread/tooltip-icon-button'
 import { cn } from '@/lib/utils'
+import { HumanMessage } from '@/components/thread/messages/human'
+import {
+  AssistantMessage,
+  AssistantMessageLoading,
+} from '@/components/thread/messages/ai'
+
+export interface ChatMessage {
+  id: string
+  role: 'human' | 'assistant'
+  content: string
+}
+
+const SAMPLE_MESSAGES: ChatMessage[] = [
+  {
+    id: '1',
+    role: 'human',
+    content: 'What is the capital of France?',
+  },
+  {
+    id: '2',
+    role: 'assistant',
+    content:
+      'The capital of France is Paris. It is the largest city in France and serves as the country\'s political, economic, and cultural center. Paris is known for landmarks like the Eiffel Tower, the Louvre Museum, and Notre-Dame Cathedral.',
+  },
+  {
+    id: '3',
+    role: 'human',
+    content: 'Thanks! Can you tell me about\nits population?',
+  },
+  {
+    id: '4',
+    role: 'assistant',
+    content:
+      'The city of Paris has a population of approximately 2.1 million people within the city limits. However, the greater Paris metropolitan area (Île-de-France) is home to around 12 million people, making it one of the most populous urban areas in Europe.',
+  },
+]
 
 export function Thread() {
   const [input, setInput] = useState('')
+  const [messages] = useState<ChatMessage[]>(SAMPLE_MESSAGES)
+  const [isLoading] = useState(false)
 
-  // Will be replaced with real message state in commits 4-5
-  const hasMessages = false
+  const hasMessages = messages.length > 0
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -68,9 +105,15 @@ export function Thread() {
               <Composer input={input} setInput={setInput} />
             </div>
           ) : (
-            /* Messages container — wired in commit 4 */
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-8 pb-16">
-              {/* Message components go here */}
+              {messages.map((msg) =>
+                msg.role === 'human' ? (
+                  <HumanMessage key={msg.id} content={msg.content} />
+                ) : (
+                  <AssistantMessage key={msg.id} content={msg.content} />
+                ),
+              )}
+              {isLoading && <AssistantMessageLoading />}
             </div>
           )}
         </div>
