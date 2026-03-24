@@ -351,17 +351,18 @@ export function Thread() {
         ) : (
           /* Chat state */
           <StickToBottom
-            className={cn(
-              'relative flex-1 overflow-y-auto',
-              '[&::-webkit-scrollbar]:w-1.5',
-              '[&::-webkit-scrollbar-thumb]:rounded-full',
-              '[&::-webkit-scrollbar-thumb]:bg-gray-300',
-              '[&::-webkit-scrollbar-track]:bg-transparent',
-            )}
+            className="relative flex-1 overflow-hidden"
             resize="smooth"
             initial="smooth"
           >
-            <StickToBottom.Content>
+            <StickToBottom.Content
+              scrollClassName={cn(
+                '[&::-webkit-scrollbar]:w-1.5',
+                '[&::-webkit-scrollbar-thumb]:rounded-full',
+                '[&::-webkit-scrollbar-thumb]:bg-gray-300',
+                '[&::-webkit-scrollbar-track]:bg-transparent',
+              )}
+            >
               <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-8 pb-16">
                 {messages.map((msg) =>
                   msg.role === 'human' ? (
