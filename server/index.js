@@ -8,7 +8,7 @@ import { createAgent } from 'langchain'
 import { z } from 'zod'
 
 const app = express()
-const port = Number(process.env.PORT ?? 8787)
+const port = Number(process.env.PORT ?? 8788)
 
 const getCurrentTime = tool(
   async ({ timezone }) => {
@@ -103,6 +103,66 @@ app.post('/api/chat', async (req, res) => {
     const message =
       error instanceof Error ? error.message : 'Unknown server error.'
     res.status(400).json({ error: message })
+  }
+})
+
+app.post('/api/chat/stream', async (req, res) => {
+  let headersSent = false
+  const abortController = new AbortController()
+
+  res.on('close', () => abortController.abort())
+
+  try {
+    const { message, threadId } = requestSchema.parse(req.body)
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
+    headersSent = true
+
+    const stream = await agent.stream(
+      { messages: [{ role: 'user', content: message }] },
+      {
+        configurable: { thread_id: threadId },
+        streamMode: 'messages',
+        recursionLimit: 10,
+        signal: abortController.signal,
+      },
+    )
+
+    for await (const [chunk] of stream) {
+      if (res.writableEnded) break
+
+      const isAIChunk = chunk._getType?.() === 'ai'
+      const content = extractMessageText(chunk.content)
+
+      if (isAIChunk && content) {
+        res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`)
+      }
+    }
+
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+      res.end()
+    }
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      if (!res.writableEnded) res.end()
+      return
+    }
+
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error.'
+
+    if (headersSent) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`)
+        res.end()
+      }
+    } else {
+      res.status(400).json({ error: message })
+    }
   }
 })
 

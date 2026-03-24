@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, PanelRightClose, SquarePen } from 'lucide-react'
+import { ArrowDown, ArrowUp, PanelRightClose, Square, SquarePen } from 'lucide-react'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
 import { Button } from '@/components/ui/button'
 import { TooltipIconButton } from '@/components/thread/tooltip-icon-button'
@@ -16,24 +16,19 @@ export interface ChatMessage {
   content: string
 }
 
-const MOCK_RESPONSES = [
-  'The capital of France is Paris. It is the largest city in France and serves as the country\'s political, economic, and cultural center.',
-  'That\'s a great question! Let me think about it. The answer involves several factors that we should consider carefully.',
-  'Here\'s what I know about that topic. There are many interesting aspects to explore, and I\'d be happy to dive deeper into any of them.',
-  'I appreciate you asking! This is a fascinating subject with a rich history and many modern developments worth discussing.',
-]
-
 let nextId = 1
 
 export function Thread() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const threadIdRef = useRef(crypto.randomUUID())
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const hasMessages = messages.length > 0
 
   const handleSend = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const trimmed = text.trim()
       if (!trimmed || isLoading) return
 
@@ -43,29 +38,105 @@ export function Thread() {
         content: trimmed,
       }
 
-      setMessages((prev) => [...prev, humanMsg])
+      const assistantMsgId = String(nextId++)
+
+      setMessages((prev) => [
+        ...prev,
+        humanMsg,
+        { id: assistantMsgId, role: 'assistant' as const, content: '' },
+      ])
       setInput('')
       setIsLoading(true)
 
-      // WHY: Mock response with delay simulates streaming latency.
-      // Will be replaced by real SSE streaming in commit 7.
-      setTimeout(() => {
-        const aiMsg: ChatMessage = {
-          id: String(nextId++),
-          role: 'assistant',
-          content: MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)],
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: trimmed,
+            threadId: threadIdRef.current,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok || !response.body) {
+          const err = await response.json().catch(() => null)
+          throw new Error(
+            err?.error ?? `Server error (${response.status})`,
+          )
         }
-        setMessages((prev) => [...prev, aiMsg])
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop()!
+
+          for (const part of parts) {
+            const line = part.trim()
+            if (!line.startsWith('data: ')) continue
+
+            let event: { type: string; content?: string; message?: string }
+            try {
+              event = JSON.parse(line.slice(6))
+            } catch {
+              continue
+            }
+
+            if (event.type === 'token' && event.content) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMsgId
+                    ? { ...msg, content: msg.content + event.content }
+                    : msg,
+                ),
+              )
+            } else if (event.type === 'error') {
+              throw new Error(event.message ?? 'Stream error')
+            }
+          }
+        }
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          // User stopped — keep partial content, remove if empty
+          setMessages((prev) =>
+            prev.filter(
+              (msg) => !(msg.id === assistantMsgId && !msg.content),
+            ),
+          )
+        } else {
+          console.error('Stream error:', error)
+          setMessages((prev) =>
+            prev.filter((msg) => msg.id !== assistantMsgId),
+          )
+        }
+      } finally {
+        abortControllerRef.current = null
         setIsLoading(false)
-      }, 1500)
+      }
     },
     [isLoading],
   )
 
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort()
+  }, [])
+
   const handleNewThread = useCallback(() => {
+    abortControllerRef.current?.abort()
     setMessages([])
     setInput('')
     setIsLoading(false)
+    threadIdRef.current = crypto.randomUUID()
   }, [])
 
   return (
@@ -119,6 +190,7 @@ export function Thread() {
                 input={input}
                 setInput={setInput}
                 onSend={handleSend}
+                onStop={handleStop}
                 isLoading={isLoading}
               />
             </div>
@@ -141,11 +213,12 @@ export function Thread() {
                 {messages.map((msg) =>
                   msg.role === 'human' ? (
                     <HumanMessage key={msg.id} content={msg.content} />
-                  ) : (
+                  ) : msg.content ? (
                     <AssistantMessage key={msg.id} content={msg.content} />
+                  ) : (
+                    <AssistantMessageLoading key={msg.id} />
                   ),
                 )}
-                {isLoading && <AssistantMessageLoading />}
               </div>
             </StickToBottom.Content>
 
@@ -160,6 +233,7 @@ export function Thread() {
               input={input}
               setInput={setInput}
               onSend={handleSend}
+              onStop={handleStop}
               isLoading={isLoading}
             />
           </div>
@@ -189,11 +263,13 @@ function Composer({
   input,
   setInput,
   onSend,
+  onStop,
   isLoading,
 }: {
   input: string
   setInput: (value: string) => void
   onSend: (text: string) => void
+  onStop: () => void
   isLoading: boolean
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -235,14 +311,26 @@ function Composer({
           rows={1}
         />
         <div className="flex items-center justify-end p-2 pt-4">
-          <Button
-            type="submit"
-            size="icon"
-            className="ml-auto rounded-lg shadow-md transition-all"
-            disabled={!input.trim() || isLoading}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
+          {isLoading ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="ml-auto rounded-lg shadow-md transition-all"
+              onClick={onStop}
+            >
+              <Square className="size-3 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              className="ml-auto rounded-lg shadow-md transition-all"
+              disabled={!input.trim()}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          )}
         </div>
       </form>
     </div>
