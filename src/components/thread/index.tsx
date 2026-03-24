@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, PanelRightClose, Square, SquarePen } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  PanelRightClose,
+  Square,
+  SquarePen,
+} from 'lucide-react'
+import { motion } from 'framer-motion'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { TooltipIconButton } from '@/components/thread/tooltip-icon-button'
 import { cn } from '@/lib/utils'
 import { HumanMessage } from '@/components/thread/messages/human'
@@ -10,6 +22,8 @@ import {
   AssistantMessage,
   AssistantMessageLoading,
 } from '@/components/thread/messages/ai'
+import { ThreadHistory } from '@/components/thread/history'
+import { useMediaQuery } from '@/hooks/use-media-query'
 
 export interface ChatMessage {
   id: string
@@ -19,13 +33,19 @@ export interface ChatMessage {
 
 let nextId = 1
 
+const SIDEBAR_WIDTH = 300
+const springTransition = { type: 'spring', stiffness: 300, damping: 30 } as const
+
 export function Thread() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
   const threadIdRef = useRef(crypto.randomUUID())
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
   const hasMessages = messages.length > 0
 
   // Connection check on mount
@@ -42,8 +62,6 @@ export function Thread() {
       })
   }, [])
 
-  // Streams an assistant response for `messageText`, appending tokens into
-  // the placeholder message identified by `assistantMsgId`.
   const streamResponse = useCallback(
     async (messageText: string, assistantMsgId: string, signal: AbortSignal) => {
       const response = await fetch('/api/chat/stream', {
@@ -101,8 +119,6 @@ export function Thread() {
     [],
   )
 
-  // Handles stream errors: keeps partial content on abort, removes placeholder
-  // and shows toast on real errors.
   const handleStreamError = useCallback(
     (error: unknown, assistantMsgId: string) => {
       if ((error as Error).name === 'AbortError') {
@@ -149,6 +165,8 @@ export function Thread() {
 
       try {
         await streamResponse(trimmed, assistantMsgId, controller.signal)
+        // Refresh thread list after a successful message exchange
+        setRefreshKey((k) => k + 1)
       } catch (error) {
         handleStreamError(error, assistantMsgId)
       } finally {
@@ -167,7 +185,6 @@ export function Thread() {
     (assistantMsgId: string) => {
       if (isLoading) return
 
-      // Find the preceding human message before removing anything
       const msgs = messages
       const aiIdx = msgs.findIndex((m) => m.id === assistantMsgId)
       if (aiIdx < 0) return
@@ -181,7 +198,6 @@ export function Thread() {
       }
       if (!humanContent) return
 
-      // Replace old assistant message with an empty placeholder, then stream into it
       const newAssistantId = String(nextId++)
       setMessages((prev) =>
         prev.map((m) =>
@@ -213,9 +229,65 @@ export function Thread() {
     threadIdRef.current = crypto.randomUUID()
   }, [])
 
+  const handleSelectThread = useCallback(
+    (threadId: string) => {
+      if (threadId === threadIdRef.current) return
+      abortControllerRef.current?.abort()
+      setMessages([])
+      setInput('')
+      setIsLoading(false)
+      threadIdRef.current = threadId
+      // Close mobile sheet on selection
+      if (!isDesktop) setSidebarOpen(false)
+    },
+    [isDesktop],
+  )
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev)
+  }, [])
+
+  // Sidebar content shared between desktop and mobile
+  const sidebarContent = (
+    <ThreadHistory
+      currentThreadId={threadIdRef.current}
+      onSelectThread={handleSelectThread}
+      onNewThread={handleNewThread}
+      refreshKey={refreshKey}
+    />
+  )
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      {/* Desktop sidebar — animated with Framer Motion */}
+      {isDesktop && (
+        <motion.div
+          className="h-full shrink-0 overflow-hidden border-r bg-background"
+          style={{ width: SIDEBAR_WIDTH }}
+          animate={{ marginLeft: sidebarOpen ? 0 : -SIDEBAR_WIDTH }}
+          initial={{ marginLeft: -SIDEBAR_WIDTH }}
+          transition={springTransition}
+        >
+          {sidebarContent}
+        </motion.div>
+      )}
+
+      {/* Mobile sidebar — Sheet overlay */}
+      {!isDesktop && (
+        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <SheetContent side="left" className="w-[300px] p-0">
+            <SheetTitle className="sr-only">Chat History</SheetTitle>
+            {sidebarContent}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* Main content area */}
+      <motion.div
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+        layout
+        transition={springTransition}
+      >
         {/* Header */}
         <div className="relative z-10">
           <header className="flex items-center justify-between px-4 py-3">
@@ -223,17 +295,24 @@ export function Thread() {
               <TooltipIconButton
                 tooltip="Toggle sidebar"
                 className="size-8 p-1.5"
+                onClick={toggleSidebar}
               >
                 <PanelRightClose className="size-5" />
               </TooltipIconButton>
 
               {hasMessages && (
-                <>
+                <motion.div
+                  className="flex items-center gap-2"
+                  animate={{
+                    marginLeft: !sidebarOpen && isDesktop ? 8 : 0,
+                  }}
+                  transition={springTransition}
+                >
                   <ChatLogo className="ml-1" />
                   <span className="text-xl font-semibold tracking-tight">
                     Agent Chat
                   </span>
-                </>
+                </motion.div>
               )}
             </div>
 
@@ -253,7 +332,7 @@ export function Thread() {
         </div>
 
         {!hasMessages ? (
-          /* Empty state — logo + title centered at ~25vh, composer below */
+          /* Empty state */
           <div className="flex-1 overflow-y-auto">
             <div className="mt-[25vh] flex w-full flex-col items-center px-4">
               <ChatLogo className="mb-4 h-12 w-12" />
@@ -270,7 +349,7 @@ export function Thread() {
             </div>
           </div>
         ) : (
-          /* Chat state — stick-to-bottom scroll with messages + composer */
+          /* Chat state */
           <StickToBottom
             className={cn(
               'relative flex-1 overflow-y-auto',
@@ -304,7 +383,7 @@ export function Thread() {
           </StickToBottom>
         )}
 
-        {/* Bottom-pinned composer (visible only when messages exist) */}
+        {/* Bottom-pinned composer */}
         {hasMessages && (
           <div className="px-4">
             <Composer
@@ -316,7 +395,7 @@ export function Thread() {
             />
           </div>
         )}
-      </div>
+      </motion.div>
     </div>
   )
 }

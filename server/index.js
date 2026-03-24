@@ -73,13 +73,36 @@ const extractMessageText = (content) => {
 app.use(cors())
 app.use(express.json())
 
+// In-memory thread metadata store — keyed by thread_id
+const threads = new Map()
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
+})
+
+app.get('/api/threads', (_req, res) => {
+  const list = Array.from(threads.values()).sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  )
+  res.json(list)
 })
 
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, threadId } = requestSchema.parse(req.body)
+
+    // Track thread metadata
+    const now = new Date().toISOString()
+    if (!threads.has(threadId)) {
+      threads.set(threadId, {
+        thread_id: threadId,
+        created_at: now,
+        updated_at: now,
+        first_message_preview: message.slice(0, 100),
+      })
+    } else {
+      threads.get(threadId).updated_at = now
+    }
 
     const result = await agent.invoke(
       {
@@ -114,6 +137,19 @@ app.post('/api/chat/stream', async (req, res) => {
 
   try {
     const { message, threadId } = requestSchema.parse(req.body)
+
+    // Track thread metadata
+    const now = new Date().toISOString()
+    if (!threads.has(threadId)) {
+      threads.set(threadId, {
+        thread_id: threadId,
+        created_at: now,
+        updated_at: now,
+        first_message_preview: message.slice(0, 100),
+      })
+    } else {
+      threads.get(threadId).updated_at = now
+    }
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
