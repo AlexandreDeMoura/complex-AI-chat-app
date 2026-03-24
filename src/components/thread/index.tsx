@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, PanelRightClose, Square, SquarePen } from 'lucide-react'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { TooltipIconButton } from '@/components/thread/tooltip-icon-button'
 import { cn } from '@/lib/utils'
@@ -27,6 +28,102 @@ export function Thread() {
 
   const hasMessages = messages.length > 0
 
+  // Connection check on mount
+  useEffect(() => {
+    fetch('/api/health')
+      .then((res) => {
+        if (!res.ok) throw new Error(`Status ${res.status}`)
+      })
+      .catch(() => {
+        toast.error('Unable to reach the backend server', {
+          description: 'Make sure the server is running with: node server/index.js',
+          duration: 10000,
+        })
+      })
+  }, [])
+
+  // Streams an assistant response for `messageText`, appending tokens into
+  // the placeholder message identified by `assistantMsgId`.
+  const streamResponse = useCallback(
+    async (messageText: string, assistantMsgId: string, signal: AbortSignal) => {
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: messageText,
+          threadId: threadIdRef.current,
+        }),
+        signal,
+      })
+
+      if (!response.ok || !response.body) {
+        const err = await response.json().catch(() => null)
+        throw new Error(err?.error ?? `Server error (${response.status})`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop()!
+
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data: ')) continue
+
+          let event: { type: string; content?: string; message?: string }
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+
+          if (event.type === 'token' && event.content) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMsgId
+                  ? { ...msg, content: msg.content + event.content }
+                  : msg,
+              ),
+            )
+          } else if (event.type === 'error') {
+            throw new Error(event.message ?? 'Stream error')
+          }
+        }
+      }
+    },
+    [],
+  )
+
+  // Handles stream errors: keeps partial content on abort, removes placeholder
+  // and shows toast on real errors.
+  const handleStreamError = useCallback(
+    (error: unknown, assistantMsgId: string) => {
+      if ((error as Error).name === 'AbortError') {
+        setMessages((prev) =>
+          prev.filter(
+            (msg) => !(msg.id === assistantMsgId && !msg.content),
+          ),
+        )
+      } else {
+        toast.error('An error occurred. Please try again.', {
+          description: (error as Error).message,
+          duration: 10000,
+        })
+        setMessages((prev) =>
+          prev.filter((msg) => msg.id !== assistantMsgId),
+        )
+      }
+    },
+    [],
+  )
+
   const handleSend = useCallback(
     async (text: string) => {
       const trimmed = text.trim()
@@ -37,7 +134,6 @@ export function Thread() {
         role: 'human',
         content: trimmed,
       }
-
       const assistantMsgId = String(nextId++)
 
       setMessages((prev) => [
@@ -52,84 +148,62 @@ export function Thread() {
       abortControllerRef.current = controller
 
       try {
-        const response = await fetch('/api/chat/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: trimmed,
-            threadId: threadIdRef.current,
-          }),
-          signal: controller.signal,
-        })
-
-        if (!response.ok || !response.body) {
-          const err = await response.json().catch(() => null)
-          throw new Error(
-            err?.error ?? `Server error (${response.status})`,
-          )
-        }
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const parts = buffer.split('\n\n')
-          buffer = parts.pop()!
-
-          for (const part of parts) {
-            const line = part.trim()
-            if (!line.startsWith('data: ')) continue
-
-            let event: { type: string; content?: string; message?: string }
-            try {
-              event = JSON.parse(line.slice(6))
-            } catch {
-              continue
-            }
-
-            if (event.type === 'token' && event.content) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMsgId
-                    ? { ...msg, content: msg.content + event.content }
-                    : msg,
-                ),
-              )
-            } else if (event.type === 'error') {
-              throw new Error(event.message ?? 'Stream error')
-            }
-          }
-        }
+        await streamResponse(trimmed, assistantMsgId, controller.signal)
       } catch (error) {
-        if ((error as Error).name === 'AbortError') {
-          // User stopped — keep partial content, remove if empty
-          setMessages((prev) =>
-            prev.filter(
-              (msg) => !(msg.id === assistantMsgId && !msg.content),
-            ),
-          )
-        } else {
-          console.error('Stream error:', error)
-          setMessages((prev) =>
-            prev.filter((msg) => msg.id !== assistantMsgId),
-          )
-        }
+        handleStreamError(error, assistantMsgId)
       } finally {
         abortControllerRef.current = null
         setIsLoading(false)
       }
     },
-    [isLoading],
+    [isLoading, streamResponse, handleStreamError],
   )
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
   }, [])
+
+  const handleRegenerate = useCallback(
+    (assistantMsgId: string) => {
+      if (isLoading) return
+
+      // Find the preceding human message before removing anything
+      const msgs = messages
+      const aiIdx = msgs.findIndex((m) => m.id === assistantMsgId)
+      if (aiIdx < 0) return
+
+      let humanContent = ''
+      for (let i = aiIdx - 1; i >= 0; i--) {
+        if (msgs[i].role === 'human') {
+          humanContent = msgs[i].content
+          break
+        }
+      }
+      if (!humanContent) return
+
+      // Replace old assistant message with an empty placeholder, then stream into it
+      const newAssistantId = String(nextId++)
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? { id: newAssistantId, role: 'assistant' as const, content: '' }
+            : m,
+        ),
+      )
+      setIsLoading(true)
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      streamResponse(humanContent, newAssistantId, controller.signal)
+        .catch((error) => handleStreamError(error, newAssistantId))
+        .finally(() => {
+          abortControllerRef.current = null
+          setIsLoading(false)
+        })
+    },
+    [isLoading, messages, streamResponse, handleStreamError],
+  )
 
   const handleNewThread = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -214,7 +288,11 @@ export function Thread() {
                   msg.role === 'human' ? (
                     <HumanMessage key={msg.id} content={msg.content} />
                   ) : msg.content ? (
-                    <AssistantMessage key={msg.id} content={msg.content} />
+                    <AssistantMessage
+                      key={msg.id}
+                      content={msg.content}
+                      onRegenerate={() => handleRegenerate(msg.id)}
+                    />
                   ) : (
                     <AssistantMessageLoading key={msg.id} />
                   ),
