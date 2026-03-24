@@ -1,3 +1,5 @@
+import { MarkdownText } from "@/components/thread/markdown-text"
+
 export interface AssistantMessageProps {
   content: string
 }
@@ -7,7 +9,7 @@ export function AssistantMessage({ content }: AssistantMessageProps) {
     <div className="group mr-auto flex w-full items-start gap-2">
       <div className="flex w-full flex-col gap-2">
         <div className="py-1">
-          <p className="leading-7 whitespace-pre-wrap">{content}</p>
+          <MarkdownText>{content}</MarkdownText>
         </div>
       </div>
     </div>
