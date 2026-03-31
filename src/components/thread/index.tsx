@@ -386,7 +386,7 @@ export function Thread() {
       {/* Desktop sidebar */}
       {isDesktop && (
         <motion.div
-          className="h-full shrink-0 overflow-hidden border-r bg-background"
+          className="h-full shrink-0 overflow-hidden border-r border-sidebar-border bg-sidebar"
           style={{ width: SIDEBAR_WIDTH }}
           animate={{ marginLeft: sidebarOpen ? 0 : -SIDEBAR_WIDTH }}
           initial={{ marginLeft: -SIDEBAR_WIDTH }}
@@ -473,10 +473,9 @@ export function Thread() {
           /* Empty state */
           <div className="flex-1 overflow-y-auto">
             <div className="mt-[25vh] flex w-full flex-col items-center px-4">
-              <ChatLogo className="mb-4 h-12 w-12" />
-              <h1 className="mb-8 text-2xl font-semibold tracking-tight">
-                Agent Chat
-              </h1>
+              <ChatLogo className="mb-4 h-10 w-10" />
+              <h1 className="text-xl font-semibold tracking-tight">Agent Chat</h1>
+              <p className="text-sm text-muted-foreground mb-8">Ask me anything.</p>
               <Composer
                 input={input}
                 setInput={setInput}

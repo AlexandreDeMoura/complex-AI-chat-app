@@ -49,7 +49,7 @@ export function ThreadHistory({
   return (
     <div className="flex h-full flex-col">
       {/* Sidebar header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
+      <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <span className="text-sm font-semibold tracking-tight">
           Chat History
         </span>
@@ -91,13 +91,13 @@ export function ThreadHistory({
                 type="button"
                 onClick={() => onSelectThread(thread.thread_id)}
                 className={cn(
-                  'w-full rounded-lg px-3 py-2 text-left text-sm transition-colors',
-                  'hover:bg-muted',
+                  'w-full rounded-xl px-3 py-2 text-left text-sm transition-colors',
+                  'hover:bg-sidebar-accent',
                   thread.thread_id === currentThreadId &&
-                    'bg-muted font-medium',
+                    'bg-sidebar-accent font-medium',
                 )}
               >
-                <p className="truncate">
+                <p className="text-sm font-medium truncate">
                   {thread.first_message_preview || 'New conversation'}
                 </p>
                 <p className="text-muted-foreground mt-0.5 text-xs">
