@@ -1,10 +1,7 @@
-# Elegant LangChain Chat App
-
-A simple, polished AI chat application built with React + Vite on the frontend and a LangChain `createAgent()` API on the backend.
 
 ## Stack
 
-- React + TypeScript + Vite
+- React + TypeScript + Vite 
 - LangChain agent (`createAgent`) with `MemorySaver` for thread memory
 - OpenAI model via `@langchain/openai`
 - Express API (`/api/chat`)
