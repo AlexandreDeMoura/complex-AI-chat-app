@@ -2,14 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  Moon,
   PanelRightClose,
   Square,
   SquarePen,
+  Sun,
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetContent,
@@ -23,12 +27,17 @@ import {
   AssistantMessageLoading,
 } from '@/components/thread/messages/ai'
 import { ThreadHistory } from '@/components/thread/history'
+import { InterruptView, type InterruptState } from '@/components/thread/interrupt-view'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useDarkMode } from '@/hooks/use-dark-mode'
+import type { ToolCallData, ToolResultData } from '@/components/thread/messages/tool-calls'
 
 export interface ChatMessage {
   id: string
   role: 'human' | 'assistant'
   content: string
+  toolCalls?: ToolCallData[]
+  toolResults?: ToolResultData[]
 }
 
 let nextId = 1
@@ -42,11 +51,14 @@ export function Thread() {
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
+  const [hideToolCalls, setHideToolCalls] = useState(false)
   const threadIdRef = useRef(crypto.randomUUID())
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const hasMessages = messages.length > 0
+  const { isDark, toggleDarkMode } = useDarkMode()
 
   // Connection check on mount
   useEffect(() => {
@@ -62,18 +74,14 @@ export function Thread() {
       })
   }, [])
 
-  const streamResponse = useCallback(
-    async (messageText: string, assistantMsgId: string, signal: AbortSignal) => {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: messageText,
-          threadId: threadIdRef.current,
-        }),
-        signal,
-      })
-
+  // Shared SSE reader — parses events and updates the assistant message.
+  // Returns the interrupt data if one is received.
+  const readSSEStream = useCallback(
+    async (
+      response: Response,
+      assistantMsgId: string,
+      signal: AbortSignal,
+    ): Promise<InterruptState | null> => {
       if (!response.ok || !response.body) {
         const err = await response.json().catch(() => null)
         throw new Error(err?.error ?? `Server error (${response.status})`)
@@ -82,8 +90,10 @@ export function Thread() {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let receivedInterrupt: InterruptState | null = null
 
       while (true) {
+        if (signal.aborted) break
         const { done, value } = await reader.read()
         if (done) break
 
@@ -95,7 +105,7 @@ export function Thread() {
           const line = part.trim()
           if (!line.startsWith('data: ')) continue
 
-          let event: { type: string; content?: string; message?: string }
+          let event: Record<string, unknown>
           try {
             event = JSON.parse(line.slice(6))
           } catch {
@@ -106,15 +116,39 @@ export function Thread() {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === assistantMsgId
-                  ? { ...msg, content: msg.content + event.content }
+                  ? { ...msg, content: msg.content + (event.content as string) }
                   : msg,
               ),
             )
+          } else if (event.type === 'tool_result') {
+            const result: ToolResultData = {
+              toolCallId: event.toolCallId as string,
+              name: event.name as string,
+              content: event.content as string,
+            }
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMsgId
+                  ? { ...msg, toolResults: [...(msg.toolResults ?? []), result] }
+                  : msg,
+              ),
+            )
+          } else if (event.type === 'interrupt') {
+            const toolCalls = event.toolCalls as ToolCallData[]
+            receivedInterrupt = { toolCalls }
+            // Store the tool calls on the assistant message so the UI can display them
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMsgId ? { ...msg, toolCalls } : msg,
+              ),
+            )
           } else if (event.type === 'error') {
-            throw new Error(event.message ?? 'Stream error')
+            throw new Error((event.message as string) ?? 'Stream error')
           }
         }
       }
+
+      return receivedInterrupt
     },
     [],
   )
@@ -159,13 +193,32 @@ export function Thread() {
       ])
       setInput('')
       setIsLoading(true)
+      setInterrupt(null)
 
       const controller = new AbortController()
       abortControllerRef.current = controller
 
       try {
-        await streamResponse(trimmed, assistantMsgId, controller.signal)
-        // Refresh thread list after a successful message exchange
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: trimmed,
+            threadId: threadIdRef.current,
+          }),
+          signal: controller.signal,
+        })
+
+        const interruptData = await readSSEStream(
+          response,
+          assistantMsgId,
+          controller.signal,
+        )
+
+        if (interruptData) {
+          setInterrupt(interruptData)
+        }
+
         setRefreshKey((k) => k + 1)
       } catch (error) {
         handleStreamError(error, assistantMsgId)
@@ -174,7 +227,55 @@ export function Thread() {
         setIsLoading(false)
       }
     },
-    [isLoading, streamResponse, handleStreamError],
+    [isLoading, readSSEStream, handleStreamError],
+  )
+
+  const handleResume = useCallback(
+    async (action: 'approve' | 'reject', reason?: string) => {
+      setIsLoading(true)
+      setInterrupt(null)
+
+      // Create a new assistant message for the post-resume response
+      const assistantMsgId = String(nextId++)
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantMsgId, role: 'assistant' as const, content: '' },
+      ])
+
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      try {
+        const response = await fetch('/api/chat/resume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            threadId: threadIdRef.current,
+            action,
+            reason,
+          }),
+          signal: controller.signal,
+        })
+
+        const interruptData = await readSSEStream(
+          response,
+          assistantMsgId,
+          controller.signal,
+        )
+
+        if (interruptData) {
+          setInterrupt(interruptData)
+        }
+
+        setRefreshKey((k) => k + 1)
+      } catch (error) {
+        handleStreamError(error, assistantMsgId)
+      } finally {
+        abortControllerRef.current = null
+        setIsLoading(false)
+      }
+    },
+    [readSSEStream, handleStreamError],
   )
 
   const handleStop = useCallback(() => {
@@ -207,18 +308,41 @@ export function Thread() {
         ),
       )
       setIsLoading(true)
+      setInterrupt(null)
 
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      streamResponse(humanContent, newAssistantId, controller.signal)
-        .catch((error) => handleStreamError(error, newAssistantId))
-        .finally(() => {
+      ;(async () => {
+        try {
+          const response = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: humanContent,
+              threadId: threadIdRef.current,
+            }),
+            signal: controller.signal,
+          })
+
+          const interruptData = await readSSEStream(
+            response,
+            newAssistantId,
+            controller.signal,
+          )
+
+          if (interruptData) {
+            setInterrupt(interruptData)
+          }
+        } catch (error) {
+          handleStreamError(error, newAssistantId)
+        } finally {
           abortControllerRef.current = null
           setIsLoading(false)
-        })
+        }
+      })()
     },
-    [isLoading, messages, streamResponse, handleStreamError],
+    [isLoading, messages, readSSEStream, handleStreamError],
   )
 
   const handleNewThread = useCallback(() => {
@@ -226,6 +350,7 @@ export function Thread() {
     setMessages([])
     setInput('')
     setIsLoading(false)
+    setInterrupt(null)
     threadIdRef.current = crypto.randomUUID()
   }, [])
 
@@ -236,8 +361,8 @@ export function Thread() {
       setMessages([])
       setInput('')
       setIsLoading(false)
-      threadIdRef.current = threadId
-      // Close mobile sheet on selection
+      setInterrupt(null)
+      threadIdRef.current = threadId as ReturnType<typeof crypto.randomUUID>
       if (!isDesktop) setSidebarOpen(false)
     },
     [isDesktop],
@@ -247,7 +372,6 @@ export function Thread() {
     setSidebarOpen((prev) => !prev)
   }, [])
 
-  // Sidebar content shared between desktop and mobile
   const sidebarContent = (
     <ThreadHistory
       currentThreadId={threadIdRef.current}
@@ -259,7 +383,7 @@ export function Thread() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      {/* Desktop sidebar — animated with Framer Motion */}
+      {/* Desktop sidebar */}
       {isDesktop && (
         <motion.div
           className="h-full shrink-0 overflow-hidden border-r bg-background"
@@ -272,7 +396,7 @@ export function Thread() {
         </motion.div>
       )}
 
-      {/* Mobile sidebar — Sheet overlay */}
+      {/* Mobile sidebar */}
       {!isDesktop && (
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <SheetContent side="left" className="w-[300px] p-0">
@@ -316,15 +440,29 @@ export function Thread() {
               )}
             </div>
 
-            {hasMessages && (
+            <div className="flex items-center gap-1">
               <TooltipIconButton
-                tooltip="New thread"
+                tooltip={isDark ? 'Light mode' : 'Dark mode'}
                 className="size-8 p-1.5"
-                onClick={handleNewThread}
+                onClick={toggleDarkMode}
               >
-                <SquarePen className="size-5" />
+                {isDark ? (
+                  <Sun className="size-5" />
+                ) : (
+                  <Moon className="size-5" />
+                )}
               </TooltipIconButton>
-            )}
+
+              {hasMessages && (
+                <TooltipIconButton
+                  tooltip="New thread"
+                  className="size-8 p-1.5"
+                  onClick={handleNewThread}
+                >
+                  <SquarePen className="size-5" />
+                </TooltipIconButton>
+              )}
+            </div>
           </header>
 
           {/* Gradient fade under header */}
@@ -345,6 +483,8 @@ export function Thread() {
                 onSend={handleSend}
                 onStop={handleStop}
                 isLoading={isLoading}
+                hideToolCalls={hideToolCalls}
+                onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
               />
             </div>
           </div>
@@ -360,6 +500,7 @@ export function Thread() {
                 '[&::-webkit-scrollbar]:w-1.5',
                 '[&::-webkit-scrollbar-thumb]:rounded-full',
                 '[&::-webkit-scrollbar-thumb]:bg-gray-300',
+                'dark:[&::-webkit-scrollbar-thumb]:bg-gray-600',
                 '[&::-webkit-scrollbar-track]:bg-transparent',
               )}
             >
@@ -367,15 +508,27 @@ export function Thread() {
                 {messages.map((msg) =>
                   msg.role === 'human' ? (
                     <HumanMessage key={msg.id} content={msg.content} />
-                  ) : msg.content ? (
+                  ) : msg.content || msg.toolCalls?.length ? (
                     <AssistantMessage
                       key={msg.id}
                       content={msg.content}
                       onRegenerate={() => handleRegenerate(msg.id)}
+                      toolCalls={msg.toolCalls}
+                      toolResults={msg.toolResults}
+                      hideToolCalls={hideToolCalls}
                     />
                   ) : (
                     <AssistantMessageLoading key={msg.id} />
                   ),
+                )}
+
+                {interrupt && (
+                  <InterruptView
+                    interrupt={interrupt}
+                    onApprove={() => handleResume('approve')}
+                    onReject={(reason) => handleResume('reject', reason)}
+                    isLoading={isLoading}
+                  />
                 )}
               </div>
             </StickToBottom.Content>
@@ -393,6 +546,8 @@ export function Thread() {
               onSend={handleSend}
               onStop={handleStop}
               isLoading={isLoading}
+              hideToolCalls={hideToolCalls}
+              onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
             />
           </div>
         )}
@@ -423,14 +578,19 @@ function Composer({
   onSend,
   onStop,
   isLoading,
+  hideToolCalls,
+  onToggleHideToolCalls,
 }: {
   input: string
   setInput: (value: string) => void
   onSend: (text: string) => void
   onStop: () => void
   isLoading: boolean
+  hideToolCalls: boolean
+  onToggleHideToolCalls: () => void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return
@@ -450,7 +610,18 @@ function Composer({
   }
 
   return (
-    <div className="bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs">
+    <div
+      className={cn(
+        'bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all',
+        isDragOver && 'border-primary border-2 border-dotted',
+      )}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setIsDragOver(true)
+      }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={() => setIsDragOver(false)}
+    >
       <form
         className="grid grid-rows-[1fr_auto] gap-2"
         onSubmit={(e) => {
@@ -468,13 +639,27 @@ function Composer({
           onKeyDown={handleKeyDown}
           rows={1}
         />
-        <div className="flex items-center justify-end p-2 pt-4">
+        <div className="flex items-center justify-between p-2 pt-4">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="hide-tool-calls"
+              checked={hideToolCalls}
+              onCheckedChange={onToggleHideToolCalls}
+            />
+            <Label
+              htmlFor="hide-tool-calls"
+              className="text-muted-foreground cursor-pointer text-xs"
+            >
+              Hide Tool Calls
+            </Label>
+          </div>
+
           {isLoading ? (
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="ml-auto rounded-lg shadow-md transition-all"
+              className="rounded-lg shadow-md transition-all"
               onClick={onStop}
             >
               <Square className="size-3 fill-current" />
@@ -483,7 +668,7 @@ function Composer({
             <Button
               type="submit"
               size="icon"
-              className="ml-auto rounded-lg shadow-md transition-all"
+              className="rounded-lg shadow-md transition-all"
               disabled={!input.trim()}
             >
               <ArrowUp className="size-4" />

@@ -2,6 +2,7 @@ import cors from 'cors'
 import 'dotenv/config'
 import express from 'express'
 import { tool } from '@langchain/core/tools'
+import { interrupt, Command } from '@langchain/langgraph'
 import { MemorySaver } from '@langchain/langgraph'
 import { ChatOpenAI } from '@langchain/openai'
 import { createAgent } from 'langchain'
@@ -12,6 +13,18 @@ const port = Number(process.env.PORT ?? 8788)
 
 const getCurrentTime = tool(
   async ({ timezone }) => {
+    // WHY: interrupt() pauses the graph so the user can approve/reject the tool call.
+    // The resume value from Command({ resume }) is returned here.
+    const approval = interrupt({
+      tool: 'get_current_time',
+      description: `Get the current date and time in ${timezone}`,
+      args: { timezone },
+    })
+
+    if (approval?.action === 'reject') {
+      return `Tool call rejected by user. Reason: ${approval.reason || 'No reason provided.'}`
+    }
+
     return new Intl.DateTimeFormat('en-US', {
       dateStyle: 'full',
       timeStyle: 'long',
@@ -47,6 +60,12 @@ const requestSchema = z.object({
   threadId: z.string().trim().min(1, 'threadId is required.'),
 })
 
+const resumeSchema = z.object({
+  threadId: z.string().trim().min(1, 'threadId is required.'),
+  action: z.enum(['approve', 'reject']),
+  reason: z.string().optional(),
+})
+
 const extractMessageText = (content) => {
   if (typeof content === 'string') {
     return content
@@ -68,6 +87,52 @@ const extractMessageText = (content) => {
   }
 
   return ''
+}
+
+// Shared helper: stream agent output as SSE events and detect interrupts.
+async function streamAgentToSSE(stream, res, threadId) {
+  for await (const [chunk] of stream) {
+    if (res.writableEnded) break
+
+    const chunkType = chunk._getType?.()
+    const content = extractMessageText(chunk.content)
+
+    if (chunkType === 'ai' && content) {
+      res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`)
+    }
+
+    if (chunkType === 'tool' && content) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: 'tool_result',
+          toolCallId: chunk.tool_call_id,
+          name: chunk.name,
+          content,
+        })}\n\n`,
+      )
+    }
+  }
+
+  // After the stream loop, check for interrupts via graph state
+  const config = { configurable: { thread_id: threadId } }
+  const state = await agent.graph.getState(config)
+
+  if (state.next && state.next.length > 0) {
+    // Graph is paused at an interrupt — extract pending tool calls from the last AI message
+    const msgs = state.values.messages ?? []
+    const lastAI = [...msgs].reverse().find((m) => m._getType?.() === 'ai')
+    const toolCalls = (lastAI?.tool_calls ?? []).map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      args: tc.args,
+    }))
+
+    if (toolCalls.length > 0) {
+      res.write(
+        `data: ${JSON.stringify({ type: 'interrupt', toolCalls })}\n\n`,
+      )
+    }
+  }
 }
 
 app.use(cors())
@@ -104,15 +169,21 @@ app.post('/api/chat', async (req, res) => {
       threads.get(threadId).updated_at = now
     }
 
-    const result = await agent.invoke(
-      {
-        messages: [{ role: 'user', content: message }],
-      },
-      {
-        configurable: { thread_id: threadId },
-        recursionLimit: 10,
-      },
+    // Auto-approve loop: invoke until the graph completes (no pending interrupts)
+    const config = { configurable: { thread_id: threadId }, recursionLimit: 10 }
+    let result = await agent.invoke(
+      { messages: [{ role: 'user', content: message }] },
+      config,
     )
+
+    let state = await agent.graph.getState(config)
+    while (state.next && state.next.length > 0) {
+      result = await agent.invoke(
+        new Command({ resume: { action: 'approve' } }),
+        config,
+      )
+      state = await agent.graph.getState(config)
+    }
 
     const lastMessage = result.messages[result.messages.length - 1]
     const reply = extractMessageText(lastMessage?.content)
@@ -167,16 +238,63 @@ app.post('/api/chat/stream', async (req, res) => {
       },
     )
 
-    for await (const [chunk] of stream) {
-      if (res.writableEnded) break
+    await streamAgentToSSE(stream, res, threadId)
 
-      const isAIChunk = chunk._getType?.() === 'ai'
-      const content = extractMessageText(chunk.content)
-
-      if (isAIChunk && content) {
-        res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`)
-      }
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+      res.end()
     }
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      if (!res.writableEnded) res.end()
+      return
+    }
+
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error.'
+
+    if (headersSent) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`)
+        res.end()
+      }
+    } else {
+      res.status(400).json({ error: message })
+    }
+  }
+})
+
+app.post('/api/chat/resume', async (req, res) => {
+  let headersSent = false
+  const abortController = new AbortController()
+
+  res.on('close', () => abortController.abort())
+
+  try {
+    const { threadId, action, reason } = resumeSchema.parse(req.body)
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
+    headersSent = true
+
+    const resumeValue =
+      action === 'approve'
+        ? { action: 'approve' }
+        : { action: 'reject', reason: reason || '' }
+
+    const stream = await agent.stream(
+      new Command({ resume: resumeValue }),
+      {
+        configurable: { thread_id: threadId },
+        streamMode: 'messages',
+        recursionLimit: 10,
+        signal: abortController.signal,
+      },
+    )
+
+    await streamAgentToSSE(stream, res, threadId)
 
     if (!res.writableEnded) {
       res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)

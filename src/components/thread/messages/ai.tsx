@@ -2,21 +2,45 @@ import { CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
 import { MarkdownText } from "@/components/thread/markdown-text";
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import {
+  ToolCallVisualization,
+  type ToolCallData,
+  type ToolResultData,
+} from "@/components/thread/messages/tool-calls";
 
 export interface AssistantMessageProps {
   content: string;
   onRegenerate?: () => void;
+  toolCalls?: ToolCallData[];
+  toolResults?: ToolResultData[];
+  hideToolCalls?: boolean;
 }
 
-export function AssistantMessage({ content, onRegenerate }: AssistantMessageProps) {
+export function AssistantMessage({
+  content,
+  onRegenerate,
+  toolCalls,
+  toolResults,
+  hideToolCalls,
+}: AssistantMessageProps) {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
+
+  const hasToolCalls = toolCalls && toolCalls.length > 0;
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
       <div className="flex w-full flex-col gap-2">
-        <div className="py-1">
-          <MarkdownText>{content}</MarkdownText>
-        </div>
+        {hasToolCalls && !hideToolCalls && (
+          <ToolCallVisualization
+            toolCalls={toolCalls}
+            toolResults={toolResults ?? []}
+          />
+        )}
+        {content && (
+          <div className="py-1">
+            <MarkdownText>{content}</MarkdownText>
+          </div>
+        )}
         <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           <TooltipIconButton
             tooltip="Copy"
