@@ -1,4 +1,5 @@
 import { CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { MarkdownText } from "@/components/thread/markdown-text";
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -24,11 +25,20 @@ export function AssistantMessage({
   hideToolCalls,
 }: AssistantMessageProps) {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const shouldReduceMotion = useReducedMotion();
 
   const hasToolCalls = toolCalls && toolCalls.length > 0;
 
   return (
-    <div className="group mr-auto flex w-full items-start gap-2">
+    <motion.div
+      className="group mr-auto flex w-full items-start gap-2"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: shouldReduceMotion ? 0 : 0.3,
+        ease: [0.25, 0.1, 0.25, 1],
+      }}
+    >
       <div className="flex w-full flex-col gap-2">
         {hasToolCalls && !hideToolCalls && (
           <ToolCallVisualization
@@ -55,7 +65,7 @@ export function AssistantMessage({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

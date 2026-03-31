@@ -408,7 +408,7 @@ export function Thread() {
 
       {/* Main content area */}
       <motion.div
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+        className="min-w-0 flex-1"
         layout
         transition={springTransition}
       >
@@ -469,13 +469,77 @@ export function Thread() {
           <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
         </div>
 
-        {!hasMessages ? (
-          /* Empty state */
-          <div className="flex-1 overflow-y-auto">
-            <div className="mt-[25vh] flex w-full flex-col items-center px-4">
-              <ChatLogo className="mb-4 h-10 w-10" />
-              <h1 className="text-xl font-semibold tracking-tight">Agent Chat</h1>
-              <p className="text-sm text-muted-foreground mb-8">Ask me anything.</p>
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {!hasMessages ? (
+            /* Empty state */
+            <div className="flex-1 overflow-y-auto">
+              <div className="mt-[25vh] flex w-full flex-col items-center px-4">
+                <ChatLogo className="mb-4 h-10 w-10" />
+                <h1 className="text-xl font-semibold tracking-tight">Agent Chat</h1>
+                <p className="mb-8 text-sm text-muted-foreground">Ask me anything.</p>
+                <Composer
+                  input={input}
+                  setInput={setInput}
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  isLoading={isLoading}
+                  hideToolCalls={hideToolCalls}
+                  onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
+                />
+              </div>
+            </div>
+          ) : (
+            /* Chat state */
+            <StickToBottom
+              className="relative flex-1 overflow-hidden"
+              resize="smooth"
+              initial="smooth"
+            >
+              <StickToBottom.Content
+                scrollClassName={cn(
+                  '[&::-webkit-scrollbar]:w-1.5',
+                  '[&::-webkit-scrollbar-thumb]:rounded-full',
+                  '[&::-webkit-scrollbar-thumb]:bg-gray-300',
+                  'dark:[&::-webkit-scrollbar-thumb]:bg-gray-600',
+                  '[&::-webkit-scrollbar-track]:bg-transparent',
+                )}
+              >
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-8 pb-16">
+                  {messages.map((msg) =>
+                    msg.role === 'human' ? (
+                      <HumanMessage key={msg.id} content={msg.content} />
+                    ) : msg.content || msg.toolCalls?.length ? (
+                      <AssistantMessage
+                        key={msg.id}
+                        content={msg.content}
+                        onRegenerate={() => handleRegenerate(msg.id)}
+                        toolCalls={msg.toolCalls}
+                        toolResults={msg.toolResults}
+                        hideToolCalls={hideToolCalls}
+                      />
+                    ) : (
+                      <AssistantMessageLoading key={msg.id} />
+                    ),
+                  )}
+
+                  {interrupt && (
+                    <InterruptView
+                      interrupt={interrupt}
+                      onApprove={() => handleResume('approve')}
+                      onReject={(reason) => handleResume('reject', reason)}
+                      isLoading={isLoading}
+                    />
+                  )}
+                </div>
+              </StickToBottom.Content>
+
+              <ScrollToBottomButton />
+            </StickToBottom>
+          )}
+
+          {/* Bottom-pinned composer */}
+          {hasMessages && (
+            <div className="px-4">
               <Composer
                 input={input}
                 setInput={setInput}
@@ -486,70 +550,8 @@ export function Thread() {
                 onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
               />
             </div>
-          </div>
-        ) : (
-          /* Chat state */
-          <StickToBottom
-            className="relative flex-1 overflow-hidden"
-            resize="smooth"
-            initial="smooth"
-          >
-            <StickToBottom.Content
-              scrollClassName={cn(
-                '[&::-webkit-scrollbar]:w-1.5',
-                '[&::-webkit-scrollbar-thumb]:rounded-full',
-                '[&::-webkit-scrollbar-thumb]:bg-gray-300',
-                'dark:[&::-webkit-scrollbar-thumb]:bg-gray-600',
-                '[&::-webkit-scrollbar-track]:bg-transparent',
-              )}
-            >
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-8 pb-16">
-                {messages.map((msg) =>
-                  msg.role === 'human' ? (
-                    <HumanMessage key={msg.id} content={msg.content} />
-                  ) : msg.content || msg.toolCalls?.length ? (
-                    <AssistantMessage
-                      key={msg.id}
-                      content={msg.content}
-                      onRegenerate={() => handleRegenerate(msg.id)}
-                      toolCalls={msg.toolCalls}
-                      toolResults={msg.toolResults}
-                      hideToolCalls={hideToolCalls}
-                    />
-                  ) : (
-                    <AssistantMessageLoading key={msg.id} />
-                  ),
-                )}
-
-                {interrupt && (
-                  <InterruptView
-                    interrupt={interrupt}
-                    onApprove={() => handleResume('approve')}
-                    onReject={(reason) => handleResume('reject', reason)}
-                    isLoading={isLoading}
-                  />
-                )}
-              </div>
-            </StickToBottom.Content>
-
-            <ScrollToBottomButton />
-          </StickToBottom>
-        )}
-
-        {/* Bottom-pinned composer */}
-        {hasMessages && (
-          <div className="px-4">
-            <Composer
-              input={input}
-              setInput={setInput}
-              onSend={handleSend}
-              onStop={handleStop}
-              isLoading={isLoading}
-              hideToolCalls={hideToolCalls}
-              onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
-            />
-          </div>
-        )}
+          )}
+        </main>
       </motion.div>
     </div>
   )

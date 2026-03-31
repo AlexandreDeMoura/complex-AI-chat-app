@@ -1,9 +1,9 @@
-/* Base markdown styles — uses theme-aware colors for dark mode support */
 .markdown-content code:not(pre code) {
-  background-color: var(--muted);
-  padding: 0.2em 0.4em;
-  border-radius: 3px;
-  font-size: 0.9em;
+  background: var(--muted);
+  padding: 0.125rem 0.375rem;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.875rem;
+  font-family: ui-monospace, monospace;
 }
 
 .markdown-content a {
@@ -26,7 +26,13 @@
 }
 
 .markdown-content pre {
+  background: oklch(0.145 0 0);
+  color: oklch(0.985 0 0);
   overflow-x: auto;
+  border-radius: 0.75rem;
+  border: 1px solid oklch(0.269 0 0);
+  font-size: 0.875rem;
+  font-family: ui-monospace, monospace;
 }
 
 .markdown-content table {
