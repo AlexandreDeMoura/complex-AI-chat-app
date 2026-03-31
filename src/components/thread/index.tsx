@@ -633,7 +633,7 @@ function Composer({
         <textarea
           ref={textareaRef}
           aria-label="Message input"
-          className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:outline-none"
+          className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:outline-none placeholder:text-muted-foreground/50 dark:placeholder:text-foreground/30"
           placeholder="Type your message..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -649,7 +649,7 @@ function Composer({
             />
             <Label
               htmlFor="hide-tool-calls"
-              className="text-muted-foreground cursor-pointer text-xs"
+              className="text-muted-foreground dark:text-foreground/50 cursor-pointer text-xs"
             >
               Hide Tool Calls
             </Label>
