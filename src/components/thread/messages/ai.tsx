@@ -5,9 +5,8 @@ import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import {
   ToolCallVisualization,
-  type ToolCallData,
-  type ToolResultData,
 } from "@/components/thread/messages/tool-calls";
+import type { ToolCallData, ToolResultData } from '@/features/chat/model'
 
 export interface AssistantMessageProps {
   content: string;

@@ -27,18 +27,16 @@ import {
   AssistantMessageLoading,
 } from '@/components/thread/messages/ai'
 import { ThreadHistory } from '@/components/thread/history'
-import { InterruptView, type InterruptState } from '@/components/thread/interrupt-view'
+import { InterruptView } from '@/components/thread/interrupt-view'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import type { ToolCallData, ToolResultData } from '@/components/thread/messages/tool-calls'
-
-export interface ChatMessage {
-  id: string
-  role: 'human' | 'assistant'
-  content: string
-  toolCalls?: ToolCallData[]
-  toolResults?: ToolResultData[]
-}
+import {
+  checkChatHealth,
+  openChatStream,
+  openResumeStream,
+  readChatStream,
+} from '@/features/chat/data'
+import type { ChatMessage, InterruptState, ToolResultData } from '@/features/chat/model'
 
 let nextId = 1
 
@@ -62,10 +60,7 @@ export function Thread() {
 
   // Connection check on mount
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => {
-        if (!res.ok) throw new Error(`Status ${res.status}`)
-      })
+    checkChatHealth()
       .catch(() => {
         toast.error('Unable to reach the backend server', {
           description: 'Make sure the server is running with: node server/index.js',
@@ -82,49 +77,25 @@ export function Thread() {
       assistantMsgId: string,
       signal: AbortSignal,
     ): Promise<InterruptState | null> => {
-      if (!response.ok || !response.body) {
-        const err = await response.json().catch(() => null)
-        throw new Error(err?.error ?? `Server error (${response.status})`)
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
       let receivedInterrupt: InterruptState | null = null
 
-      while (true) {
-        if (signal.aborted) break
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const parts = buffer.split('\n\n')
-        buffer = parts.pop()!
-
-        for (const part of parts) {
-          const line = part.trim()
-          if (!line.startsWith('data: ')) continue
-
-          let event: Record<string, unknown>
-          try {
-            event = JSON.parse(line.slice(6))
-          } catch {
-            continue
-          }
-
-          if (event.type === 'token' && event.content) {
+      await readChatStream({
+        response,
+        signal,
+        onEvent: (event) => {
+          if (event.type === 'token') {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === assistantMsgId
-                  ? { ...msg, content: msg.content + (event.content as string) }
+                  ? { ...msg, content: msg.content + event.content }
                   : msg,
               ),
             )
           } else if (event.type === 'tool_result') {
             const result: ToolResultData = {
-              toolCallId: event.toolCallId as string,
-              name: event.name as string,
-              content: event.content as string,
+              toolCallId: event.toolCallId,
+              name: event.name,
+              content: event.content,
             }
             setMessages((prev) =>
               prev.map((msg) =>
@@ -134,19 +105,20 @@ export function Thread() {
               ),
             )
           } else if (event.type === 'interrupt') {
-            const toolCalls = event.toolCalls as ToolCallData[]
-            receivedInterrupt = { toolCalls }
+            receivedInterrupt = { toolCalls: event.toolCalls }
             // Store the tool calls on the assistant message so the UI can display them
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === assistantMsgId ? { ...msg, toolCalls } : msg,
+                msg.id === assistantMsgId
+                  ? { ...msg, toolCalls: event.toolCalls }
+                  : msg,
               ),
             )
           } else if (event.type === 'error') {
-            throw new Error((event.message as string) ?? 'Stream error')
+            throw new Error(event.message || 'Stream error')
           }
-        }
-      }
+        },
+      })
 
       return receivedInterrupt
     },
@@ -199,13 +171,9 @@ export function Thread() {
       abortControllerRef.current = controller
 
       try {
-        const response = await fetch('/api/chat/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: trimmed,
-            threadId: threadIdRef.current,
-          }),
+        const response = await openChatStream({
+          message: trimmed,
+          threadId: threadIdRef.current,
           signal: controller.signal,
         })
 
@@ -246,14 +214,10 @@ export function Thread() {
       abortControllerRef.current = controller
 
       try {
-        const response = await fetch('/api/chat/resume', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            threadId: threadIdRef.current,
-            action,
-            reason,
-          }),
+        const response = await openResumeStream({
+          threadId: threadIdRef.current,
+          action,
+          reason,
           signal: controller.signal,
         })
 
@@ -315,13 +279,9 @@ export function Thread() {
 
       ;(async () => {
         try {
-          const response = await fetch('/api/chat/stream', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: humanContent,
-              threadId: threadIdRef.current,
-            }),
+          const response = await openChatStream({
+            message: humanContent,
+            threadId: threadIdRef.current,
             signal: controller.signal,
           })
 

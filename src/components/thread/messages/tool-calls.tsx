@@ -1,18 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-export interface ToolCallData {
-  id: string
-  name: string
-  args: Record<string, unknown>
-}
-
-export interface ToolResultData {
-  toolCallId: string
-  name: string
-  content: string
-}
+import type { ToolCallData, ToolResultData } from '@/features/chat/model'
 
 interface ToolCallRowProps {
   toolCall: ToolCallData

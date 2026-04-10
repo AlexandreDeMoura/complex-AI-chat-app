@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ToolCallData } from '@/components/thread/messages/tool-calls'
-
-export interface InterruptState {
-  toolCalls: ToolCallData[]
-}
+import type { InterruptState } from '@/features/chat/model'
 
 interface InterruptViewProps {
   interrupt: InterruptState

@@ -4,13 +4,8 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-
-export interface ThreadSummary {
-  thread_id: string
-  created_at: string
-  updated_at: string
-  first_message_preview: string
-}
+import { fetchThreadHistory } from '@/features/chat/data'
+import type { ThreadSummary } from '@/features/chat/model'
 
 interface ThreadHistoryProps {
   currentThreadId: string
@@ -31,9 +26,7 @@ export function ThreadHistory({
 
   const fetchThreads = useCallback(async () => {
     try {
-      const res = await fetch('/api/threads')
-      if (!res.ok) throw new Error(`Status ${res.status}`)
-      const data: ThreadSummary[] = await res.json()
+      const data = await fetchThreadHistory()
       setThreads(data)
     } catch {
       toast.error('Failed to load thread history')
