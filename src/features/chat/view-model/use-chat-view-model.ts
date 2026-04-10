@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   checkChatHealth,
+  fetchThreadHistory,
   openChatStream,
   openResumeStream,
   readChatStream,
@@ -9,6 +10,7 @@ import {
 import type {
   ChatMessage,
   InterruptState,
+  ThreadSummary,
   ToolResultData,
 } from '@/features/chat/model'
 
@@ -23,9 +25,10 @@ interface RunAssistantStreamOptions {
 export interface ChatViewModel {
   currentThreadId: string
   messages: ChatMessage[]
+  threadHistory: ThreadSummary[]
+  isThreadHistoryLoading: boolean
   isLoading: boolean
   interrupt: InterruptState | null
-  refreshKey: number
   sendMessage: (text: string) => Promise<void>
   stopGeneration: () => void
   resumeInterrupt: (action: ResumeAction, reason?: string) => Promise<void>
@@ -52,9 +55,10 @@ function findHumanMessageBeforeAssistant(
 
 export function useChatViewModel(): ChatViewModel {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [threadHistory, setThreadHistory] = useState<ThreadSummary[]>([])
+  const [isThreadHistoryLoading, setIsThreadHistoryLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
   const threadIdRef = useRef<string>(crypto.randomUUID())
   const abortControllerRef = useRef<AbortController | null>(null)
   const nextMessageIdRef = useRef(1)
@@ -80,6 +84,30 @@ export function useChatViewModel(): ChatViewModel {
     },
     [],
   )
+
+  const loadThreadHistory = useCallback(
+    async ({ showLoading = true }: { showLoading?: boolean } = {}) => {
+      if (showLoading) {
+        setIsThreadHistoryLoading(true)
+      }
+
+      try {
+        const history = await fetchThreadHistory()
+        setThreadHistory(history)
+      } catch {
+        toast.error('Failed to load thread history')
+      } finally {
+        if (showLoading) {
+          setIsThreadHistoryLoading(false)
+        }
+      }
+    },
+    [],
+  )
+
+  useEffect(() => {
+    void loadThreadHistory()
+  }, [loadThreadHistory])
 
   const readSSEStream = useCallback(
     async (
@@ -229,10 +257,12 @@ export function useChatViewModel(): ChatViewModel {
             threadId: threadIdRef.current,
             signal,
           }),
-        onCompleted: () => setRefreshKey((key) => key + 1),
+        onCompleted: () => {
+          void loadThreadHistory({ showLoading: false })
+        },
       })
     },
-    [createMessageId, isLoading, runAssistantStream],
+    [createMessageId, isLoading, loadThreadHistory, runAssistantStream],
   )
 
   const resumeInterrupt = useCallback(
@@ -255,10 +285,12 @@ export function useChatViewModel(): ChatViewModel {
             reason,
             signal,
           }),
-        onCompleted: () => setRefreshKey((key) => key + 1),
+        onCompleted: () => {
+          void loadThreadHistory({ showLoading: false })
+        },
       })
     },
-    [createMessageId, runAssistantStream],
+    [createMessageId, loadThreadHistory, runAssistantStream],
   )
 
   const stopGeneration = useCallback(() => {
@@ -292,9 +324,12 @@ export function useChatViewModel(): ChatViewModel {
             threadId: threadIdRef.current,
             signal,
           }),
+        onCompleted: () => {
+          void loadThreadHistory({ showLoading: false })
+        },
       })
     },
-    [createMessageId, isLoading, messages, runAssistantStream],
+    [createMessageId, isLoading, loadThreadHistory, messages, runAssistantStream],
   )
 
   const startNewThread = useCallback(() => {
@@ -318,9 +353,10 @@ export function useChatViewModel(): ChatViewModel {
   return {
     currentThreadId: threadIdRef.current,
     messages,
+    threadHistory,
+    isThreadHistoryLoading,
     isLoading,
     interrupt,
-    refreshKey,
     sendMessage,
     stopGeneration,
     resumeInterrupt,

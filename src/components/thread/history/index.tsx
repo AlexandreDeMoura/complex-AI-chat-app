@@ -1,47 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
 import { SquarePen } from 'lucide-react'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { fetchThreadHistory } from '@/features/chat/data'
 import type { ThreadSummary } from '@/features/chat/model'
 
 interface ThreadHistoryProps {
   currentThreadId: string
+  threads: ThreadSummary[]
+  isLoading: boolean
   onSelectThread: (threadId: string) => void
   onNewThread: () => void
-  /** Incremented to signal that the list should refresh */
-  refreshKey: number
 }
 
 export function ThreadHistory({
   currentThreadId,
+  threads,
+  isLoading,
   onSelectThread,
   onNewThread,
-  refreshKey,
 }: ThreadHistoryProps) {
-  const [threads, setThreads] = useState<ThreadSummary[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-
-  const fetchThreads = useCallback(async () => {
-    try {
-      const data = await fetchThreadHistory()
-      setThreads(data)
-    } catch {
-      toast.error('Failed to load thread history')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchThreads()
-  }, [fetchThreads, refreshKey])
-
   return (
     <div className="flex h-full flex-col">
-      {/* Sidebar header */}
       <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <span className="text-sm font-semibold tracking-tight">
           Chat History
@@ -56,7 +35,6 @@ export function ThreadHistory({
         </Button>
       </div>
 
-      {/* Thread list */}
       <div
         className={cn(
           'flex-1 overflow-y-auto p-2',
