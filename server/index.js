@@ -4,6 +4,7 @@ import express from 'express'
 import { tool } from '@langchain/core/tools'
 import { interrupt, Command } from '@langchain/langgraph'
 import { MemorySaver } from '@langchain/langgraph'
+import { ChatAnthropic } from '@langchain/anthropic'
 import { ChatOpenAI } from '@langchain/openai'
 import { createAgent } from 'langchain'
 import { z } from 'zod'
@@ -41,11 +42,12 @@ const getCurrentTime = tool(
   },
 )
 
-const model = new ChatOpenAI({
-  model: process.env.LLM_MODEL ?? 'gpt-4.1-mini',
-  temperature: 0.65,
-  apiKey: process.env.OPENAI_API_KEY,
-})
+const llmModel = process.env.LLM_MODEL ?? 'gpt-4.1-mini'
+
+// WHY: provider is inferred from the model name so callers only set LLM_MODEL
+const model = llmModel.startsWith('claude-')
+  ? new ChatAnthropic({ model: llmModel, temperature: 0.65, apiKey: process.env.ANTHROPIC_API_KEY })
+  : new ChatOpenAI({ model: llmModel, temperature: 0.65, apiKey: process.env.OPENAI_API_KEY })
 
 const agent = createAgent({
   model,
