@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -30,302 +29,55 @@ import { ThreadHistory } from '@/components/thread/history'
 import { InterruptView } from '@/components/thread/interrupt-view'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import {
-  checkChatHealth,
-  openChatStream,
-  openResumeStream,
-  readChatStream,
-} from '@/features/chat/data'
-import type { ChatMessage, InterruptState, ToolResultData } from '@/features/chat/model'
-
-let nextId = 1
+import { useChatViewModel } from '@/features/chat/view-model'
 
 const SIDEBAR_WIDTH = 300
 const springTransition = { type: 'spring', stiffness: 300, damping: 30 } as const
 
 export function Thread() {
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
   const [hideToolCalls, setHideToolCalls] = useState(false)
-  const threadIdRef = useRef(crypto.randomUUID())
-  const abortControllerRef = useRef<AbortController | null>(null)
+  const {
+    currentThreadId,
+    messages,
+    isLoading,
+    interrupt,
+    refreshKey,
+    sendMessage,
+    stopGeneration,
+    resumeInterrupt,
+    regenerateMessage,
+    startNewThread,
+    selectThread,
+  } = useChatViewModel()
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const hasMessages = messages.length > 0
   const { isDark, toggleDarkMode } = useDarkMode()
 
-  // Connection check on mount
-  useEffect(() => {
-    checkChatHealth()
-      .catch(() => {
-        toast.error('Unable to reach the backend server', {
-          description: 'Make sure the server is running with: node server/index.js',
-          duration: 10000,
-        })
-      })
-  }, [])
-
-  // Shared SSE reader — parses events and updates the assistant message.
-  // Returns the interrupt data if one is received.
-  const readSSEStream = useCallback(
-    async (
-      response: Response,
-      assistantMsgId: string,
-      signal: AbortSignal,
-    ): Promise<InterruptState | null> => {
-      let receivedInterrupt: InterruptState | null = null
-
-      await readChatStream({
-        response,
-        signal,
-        onEvent: (event) => {
-          if (event.type === 'token') {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMsgId
-                  ? { ...msg, content: msg.content + event.content }
-                  : msg,
-              ),
-            )
-          } else if (event.type === 'tool_result') {
-            const result: ToolResultData = {
-              toolCallId: event.toolCallId,
-              name: event.name,
-              content: event.content,
-            }
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMsgId
-                  ? { ...msg, toolResults: [...(msg.toolResults ?? []), result] }
-                  : msg,
-              ),
-            )
-          } else if (event.type === 'interrupt') {
-            receivedInterrupt = { toolCalls: event.toolCalls }
-            // Store the tool calls on the assistant message so the UI can display them
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMsgId
-                  ? { ...msg, toolCalls: event.toolCalls }
-                  : msg,
-              ),
-            )
-          } else if (event.type === 'error') {
-            throw new Error(event.message || 'Stream error')
-          }
-        },
-      })
-
-      return receivedInterrupt
-    },
-    [],
-  )
-
-  const handleStreamError = useCallback(
-    (error: unknown, assistantMsgId: string) => {
-      if ((error as Error).name === 'AbortError') {
-        setMessages((prev) =>
-          prev.filter(
-            (msg) => !(msg.id === assistantMsgId && !msg.content),
-          ),
-        )
-      } else {
-        toast.error('An error occurred. Please try again.', {
-          description: (error as Error).message,
-          duration: 10000,
-        })
-        setMessages((prev) =>
-          prev.filter((msg) => msg.id !== assistantMsgId),
-        )
-      }
-    },
-    [],
-  )
+  const handleNewThread = useCallback(() => {
+    startNewThread()
+    setInput('')
+  }, [startNewThread])
 
   const handleSend = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim()
-      if (!trimmed || isLoading) return
-
-      const humanMsg: ChatMessage = {
-        id: String(nextId++),
-        role: 'human',
-        content: trimmed,
-      }
-      const assistantMsgId = String(nextId++)
-
-      setMessages((prev) => [
-        ...prev,
-        humanMsg,
-        { id: assistantMsgId, role: 'assistant' as const, content: '' },
-      ])
+    (text: string) => {
+      if (!text.trim() || isLoading) return
       setInput('')
-      setIsLoading(true)
-      setInterrupt(null)
-
-      const controller = new AbortController()
-      abortControllerRef.current = controller
-
-      try {
-        const response = await openChatStream({
-          message: trimmed,
-          threadId: threadIdRef.current,
-          signal: controller.signal,
-        })
-
-        const interruptData = await readSSEStream(
-          response,
-          assistantMsgId,
-          controller.signal,
-        )
-
-        if (interruptData) {
-          setInterrupt(interruptData)
-        }
-
-        setRefreshKey((k) => k + 1)
-      } catch (error) {
-        handleStreamError(error, assistantMsgId)
-      } finally {
-        abortControllerRef.current = null
-        setIsLoading(false)
-      }
+      void sendMessage(text)
     },
-    [isLoading, readSSEStream, handleStreamError],
+    [isLoading, sendMessage],
   )
-
-  const handleResume = useCallback(
-    async (action: 'approve' | 'reject', reason?: string) => {
-      setIsLoading(true)
-      setInterrupt(null)
-
-      // Create a new assistant message for the post-resume response
-      const assistantMsgId = String(nextId++)
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantMsgId, role: 'assistant' as const, content: '' },
-      ])
-
-      const controller = new AbortController()
-      abortControllerRef.current = controller
-
-      try {
-        const response = await openResumeStream({
-          threadId: threadIdRef.current,
-          action,
-          reason,
-          signal: controller.signal,
-        })
-
-        const interruptData = await readSSEStream(
-          response,
-          assistantMsgId,
-          controller.signal,
-        )
-
-        if (interruptData) {
-          setInterrupt(interruptData)
-        }
-
-        setRefreshKey((k) => k + 1)
-      } catch (error) {
-        handleStreamError(error, assistantMsgId)
-      } finally {
-        abortControllerRef.current = null
-        setIsLoading(false)
-      }
-    },
-    [readSSEStream, handleStreamError],
-  )
-
-  const handleStop = useCallback(() => {
-    abortControllerRef.current?.abort()
-  }, [])
-
-  const handleRegenerate = useCallback(
-    (assistantMsgId: string) => {
-      if (isLoading) return
-
-      const msgs = messages
-      const aiIdx = msgs.findIndex((m) => m.id === assistantMsgId)
-      if (aiIdx < 0) return
-
-      let humanContent = ''
-      for (let i = aiIdx - 1; i >= 0; i--) {
-        if (msgs[i].role === 'human') {
-          humanContent = msgs[i].content
-          break
-        }
-      }
-      if (!humanContent) return
-
-      const newAssistantId = String(nextId++)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsgId
-            ? { id: newAssistantId, role: 'assistant' as const, content: '' }
-            : m,
-        ),
-      )
-      setIsLoading(true)
-      setInterrupt(null)
-
-      const controller = new AbortController()
-      abortControllerRef.current = controller
-
-      ;(async () => {
-        try {
-          const response = await openChatStream({
-            message: humanContent,
-            threadId: threadIdRef.current,
-            signal: controller.signal,
-          })
-
-          const interruptData = await readSSEStream(
-            response,
-            newAssistantId,
-            controller.signal,
-          )
-
-          if (interruptData) {
-            setInterrupt(interruptData)
-          }
-        } catch (error) {
-          handleStreamError(error, newAssistantId)
-        } finally {
-          abortControllerRef.current = null
-          setIsLoading(false)
-        }
-      })()
-    },
-    [isLoading, messages, readSSEStream, handleStreamError],
-  )
-
-  const handleNewThread = useCallback(() => {
-    abortControllerRef.current?.abort()
-    setMessages([])
-    setInput('')
-    setIsLoading(false)
-    setInterrupt(null)
-    threadIdRef.current = crypto.randomUUID()
-  }, [])
 
   const handleSelectThread = useCallback(
     (threadId: string) => {
-      if (threadId === threadIdRef.current) return
-      abortControllerRef.current?.abort()
-      setMessages([])
+      if (threadId === currentThreadId) return
+      selectThread(threadId)
       setInput('')
-      setIsLoading(false)
-      setInterrupt(null)
-      threadIdRef.current = threadId as ReturnType<typeof crypto.randomUUID>
       if (!isDesktop) setSidebarOpen(false)
     },
-    [isDesktop],
+    [currentThreadId, isDesktop, selectThread],
   )
 
   const toggleSidebar = useCallback(() => {
@@ -334,7 +86,7 @@ export function Thread() {
 
   const sidebarContent = (
     <ThreadHistory
-      currentThreadId={threadIdRef.current}
+      currentThreadId={currentThreadId}
       onSelectThread={handleSelectThread}
       onNewThread={handleNewThread}
       refreshKey={refreshKey}
@@ -441,7 +193,7 @@ export function Thread() {
                   input={input}
                   setInput={setInput}
                   onSend={handleSend}
-                  onStop={handleStop}
+                  onStop={stopGeneration}
                   isLoading={isLoading}
                   hideToolCalls={hideToolCalls}
                   onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
@@ -472,7 +224,7 @@ export function Thread() {
                       <AssistantMessage
                         key={msg.id}
                         content={msg.content}
-                        onRegenerate={() => handleRegenerate(msg.id)}
+                        onRegenerate={() => regenerateMessage(msg.id)}
                         toolCalls={msg.toolCalls}
                         toolResults={msg.toolResults}
                         hideToolCalls={hideToolCalls}
@@ -485,8 +237,8 @@ export function Thread() {
                   {interrupt && (
                     <InterruptView
                       interrupt={interrupt}
-                      onApprove={() => handleResume('approve')}
-                      onReject={(reason) => handleResume('reject', reason)}
+                      onApprove={() => resumeInterrupt('approve')}
+                      onReject={(reason) => resumeInterrupt('reject', reason)}
                       isLoading={isLoading}
                     />
                   )}
@@ -504,7 +256,7 @@ export function Thread() {
                 input={input}
                 setInput={setInput}
                 onSend={handleSend}
-                onStop={handleStop}
+                onStop={stopGeneration}
                 isLoading={isLoading}
                 hideToolCalls={hideToolCalls}
                 onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
