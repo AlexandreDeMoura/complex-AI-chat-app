@@ -59,8 +59,8 @@ const streamAgentToSSE = async (stream, res, threadId, agent) => {
   await emitInterruptIfPending(agent, threadId, res)
 }
 
-export const sendMessage = async ({ message, threadId, model }) => {
-  const agent = getAgent(model)
+export const sendMessage = async ({ message, threadId, model, thinkingEffort }) => {
+  const agent = getAgent(model, thinkingEffort)
   threadStore.upsert(threadId, message, model)
 
   const config = { ...getThreadConfig(threadId), recursionLimit: RECURSION_LIMIT }
@@ -88,8 +88,8 @@ export const sendMessage = async ({ message, threadId, model }) => {
   return { reply }
 }
 
-export const streamMessage = async ({ message, threadId, model, res, signal }) => {
-  const agent = getAgent(model)
+export const streamMessage = async ({ message, threadId, model, thinkingEffort, res, signal }) => {
+  const agent = getAgent(model, thinkingEffort)
   threadStore.upsert(threadId, message, model)
 
   const stream = await agent.stream(

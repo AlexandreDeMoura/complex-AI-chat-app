@@ -13,6 +13,7 @@ const requestSchema = z.object({
   message: z.string().trim().min(1, 'Message is required.'),
   threadId: z.string().trim().min(1, 'threadId is required.'),
   model: z.string().optional(),
+  thinkingEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
 })
 
 const resumeSchema = z.object({
@@ -59,9 +60,14 @@ app.get('/api/models', (_req, res) => {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, threadId, model: requestedModel } = requestSchema.parse(req.body)
+    const {
+      message,
+      threadId,
+      model: requestedModel,
+      thinkingEffort,
+    } = requestSchema.parse(req.body)
     const model = resolveRequestModel(requestedModel)
-    const response = await sendMessage({ message, threadId, model })
+    const response = await sendMessage({ message, threadId, model, thinkingEffort })
     res.json(response)
   } catch (error) {
     const message =
@@ -77,7 +83,12 @@ app.post('/api/chat/stream', async (req, res) => {
   res.on('close', () => abortController.abort())
 
   try {
-    const { message, threadId, model: requestedModel } = requestSchema.parse(req.body)
+    const {
+      message,
+      threadId,
+      model: requestedModel,
+      thinkingEffort,
+    } = requestSchema.parse(req.body)
     const model = resolveRequestModel(requestedModel)
 
     res.setHeader('Content-Type', 'text/event-stream')
@@ -90,6 +101,7 @@ app.post('/api/chat/stream', async (req, res) => {
       message,
       threadId,
       model,
+      thinkingEffort,
       res,
       signal: abortController.signal,
     })
