@@ -125,7 +125,7 @@ export function getAgent(modelId, thinkingEffort) {
     tools: [getCurrentTime],
     checkpointer: SHARED_CHECKPOINTER,
     systemPrompt:
-      'You are a concise, warm assistant for a stylish chat app. Be direct, accurate, and practical.',
+      'You are the assistant of a senior software engineer that will mainly want to discuss, debate and explore with you about system design, architecture patterns and other software engineering topics. Be consise without sacrificing clarity and shallowness in your explanations. Your explanation about a topic should be enough for the user to make an informed technical decision on important software engineering topics. No emojis.',
   })
 
   agentCache.set(cacheKey, agent)
