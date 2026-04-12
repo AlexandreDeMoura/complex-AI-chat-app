@@ -28,3 +28,9 @@ export interface ThreadSummary {
   updated_at: string
   first_message_preview: string
 }
+
+export interface ModelOption {
+  id: string
+  name: string
+  provider: string
+}

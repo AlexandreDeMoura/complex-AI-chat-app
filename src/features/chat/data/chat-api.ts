@@ -1,8 +1,9 @@
-import type { ThreadSummary } from '@/features/chat/model'
+import type { ModelOption, ThreadSummary } from '@/features/chat/model'
 
 interface ChatStreamRequest {
   message: string
   threadId: string
+  model?: string
   signal: AbortSignal
 }
 
@@ -33,15 +34,26 @@ export async function fetchThreadHistory(): Promise<ThreadSummary[]> {
   return response.json() as Promise<ThreadSummary[]>
 }
 
+export async function fetchAvailableModels(): Promise<ModelOption[]> {
+  const response = await fetch('/api/models')
+
+  if (!response.ok) {
+    throw new Error(`Status ${response.status}`)
+  }
+
+  return response.json() as Promise<ModelOption[]>
+}
+
 export function openChatStream({
   message,
   threadId,
+  model,
   signal,
 }: ChatStreamRequest): Promise<Response> {
   return fetch('/api/chat/stream', {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ message, threadId }),
+    body: JSON.stringify({ message, threadId, model }),
     signal,
   })
 }

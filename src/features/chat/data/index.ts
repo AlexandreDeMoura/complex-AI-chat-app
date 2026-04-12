@@ -1,5 +1,6 @@
 export {
   checkChatHealth,
+  fetchAvailableModels,
   fetchThreadHistory,
   openChatStream,
   openResumeStream,
