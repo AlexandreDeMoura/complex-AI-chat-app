@@ -1,19 +1,20 @@
 const threads = new Map()
 
-const toThreadRecord = (threadId, message, now) => ({
+const toThreadRecord = (threadId, message, model, now) => ({
   thread_id: threadId,
+  model,
   created_at: now,
   updated_at: now,
   first_message_preview: message.slice(0, 100),
 })
 
 export const threadStore = {
-  upsert(threadId, message) {
+  upsert(threadId, message, model) {
     const now = new Date().toISOString()
     const existing = threads.get(threadId)
 
     if (!existing) {
-      const record = toThreadRecord(threadId, message, now)
+      const record = toThreadRecord(threadId, message, model, now)
       threads.set(threadId, record)
       return record
     }
