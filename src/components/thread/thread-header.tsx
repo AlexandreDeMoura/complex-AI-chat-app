@@ -1,6 +1,5 @@
 import { Moon, PanelRightClose, SquarePen, Sun } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { ChatLogo } from '@/components/thread/chat-logo'
 import { TooltipIconButton } from '@/components/thread/tooltip-icon-button'
 
 const springTransition = { type: 'spring', stiffness: 300, damping: 30 } as const

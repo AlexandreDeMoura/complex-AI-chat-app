@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChatLogo } from '@/components/thread/chat-logo'
 import { ThreadComposerShell } from '@/components/thread/thread-composer-shell'
 import { ThreadHeader } from '@/components/thread/thread-header'
 import { ThreadMessageList } from '@/components/thread/thread-message-list'
