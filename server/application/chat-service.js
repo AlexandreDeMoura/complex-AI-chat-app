@@ -13,6 +13,16 @@ const writeSseEvent = (res, payload) => {
   res.write(`data: ${JSON.stringify(payload)}\n\n`)
 }
 
+// WHY: thread model is locked on first write to keep checkpointer state coherent.
+const resolveThreadModel = (threadId, requestedModel) => {
+  const existing = threadStore.get(threadId)
+  if (existing?.model) {
+    return existing.model
+  }
+
+  return requestedModel
+}
+
 // WHY: interrupt state is only visible through graph state after stream completion.
 const emitInterruptIfPending = async (agent, threadId, res) => {
   const state = await agent.graph.getState(getThreadConfig(threadId))
@@ -60,8 +70,9 @@ const streamAgentToSSE = async (stream, res, threadId, agent) => {
 }
 
 export const sendMessage = async ({ message, threadId, model, thinkingEffort }) => {
-  const agent = getAgent(model, thinkingEffort)
-  threadStore.upsert(threadId, message, model)
+  const effectiveModel = resolveThreadModel(threadId, model)
+  const agent = getAgent(effectiveModel, thinkingEffort)
+  threadStore.upsert(threadId, message, effectiveModel)
 
   const config = { ...getThreadConfig(threadId), recursionLimit: RECURSION_LIMIT }
   let result = await agent.invoke(
@@ -89,8 +100,9 @@ export const sendMessage = async ({ message, threadId, model, thinkingEffort }) 
 }
 
 export const streamMessage = async ({ message, threadId, model, thinkingEffort, res, signal }) => {
-  const agent = getAgent(model, thinkingEffort)
-  threadStore.upsert(threadId, message, model)
+  const effectiveModel = resolveThreadModel(threadId, model)
+  const agent = getAgent(effectiveModel, thinkingEffort)
+  threadStore.upsert(threadId, message, effectiveModel)
 
   const stream = await agent.stream(
     { messages: [{ role: 'user', content: message }] },

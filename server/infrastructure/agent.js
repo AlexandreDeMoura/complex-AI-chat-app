@@ -7,7 +7,8 @@ import { getCurrentTime } from '../domain/tools.js'
 
 const DEFAULT_TEMPERATURE = 0.65
 const SHARED_CHECKPOINTER = new MemorySaver()
-const THINKING_EFFORTS = ['off', 'low', 'medium', 'high', 'max']
+export const THINKING_EFFORT_VALUES = ['off', 'low', 'medium', 'high', 'max']
+const THINKING_EFFORT_SET = new Set(THINKING_EFFORT_VALUES)
 
 const AVAILABLE_MODELS = [
   { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'openai', envKey: 'OPENAI_API_KEY', supportsThinking: false },
@@ -26,9 +27,15 @@ export function getAvailableModels() {
 }
 
 const normalizeThinkingEffort = (effort) => {
-  if (THINKING_EFFORTS.includes(effort)) {
-    return effort
+  if (typeof effort !== 'string') {
+    return 'off'
   }
+
+  const normalized = effort.trim().toLowerCase()
+  if (THINKING_EFFORT_SET.has(normalized)) {
+    return normalized
+  }
+
   return 'off'
 }
 

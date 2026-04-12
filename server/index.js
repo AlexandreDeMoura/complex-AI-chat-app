@@ -4,7 +4,7 @@ import express from 'express'
 import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
 import { listThreads } from './application/thread-service.js'
-import { getAvailableModels } from './infrastructure/agent.js'
+import { getAvailableModels, THINKING_EFFORT_VALUES } from './infrastructure/agent.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 8788)
@@ -13,7 +13,7 @@ const requestSchema = z.object({
   message: z.string().trim().min(1, 'Message is required.'),
   threadId: z.string().trim().min(1, 'threadId is required.'),
   model: z.string().optional(),
-  thinkingEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
+  thinkingEffort: z.enum(THINKING_EFFORT_VALUES).catch('off').optional(),
 })
 
 const resumeSchema = z.object({
@@ -45,7 +45,15 @@ const resolveRequestModel = (requestedModel) => {
     throw new Error('No models are available. Configure at least one provider API key.')
   }
 
-  return requestedModel ?? models[0].id
+  if (!requestedModel) {
+    return models[0].id
+  }
+
+  if (models.some((model) => model.id === requestedModel)) {
+    return requestedModel
+  }
+
+  throw new Error(`Model "${requestedModel}" is not available.`)
 }
 
 app.get('/api/models', (_req, res) => {
