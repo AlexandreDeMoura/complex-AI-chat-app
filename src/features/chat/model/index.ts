@@ -2,6 +2,7 @@ export type {
   ChatMessage,
   InterruptState,
   ModelOption,
+  ThinkingEffort,
   ThreadSummary,
   ToolCallData,
   ToolResultData,

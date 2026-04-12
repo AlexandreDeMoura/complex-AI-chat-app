@@ -1,9 +1,14 @@
-import type { ModelOption, ThreadSummary } from '@/features/chat/model'
+import type {
+  ModelOption,
+  ThinkingEffort,
+  ThreadSummary,
+} from '@/features/chat/model'
 
 interface ChatStreamRequest {
   message: string
   threadId: string
   model?: string
+  thinkingEffort?: ThinkingEffort
   signal: AbortSignal
 }
 
@@ -48,12 +53,13 @@ export function openChatStream({
   message,
   threadId,
   model,
+  thinkingEffort,
   signal,
 }: ChatStreamRequest): Promise<Response> {
   return fetch('/api/chat/stream', {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ message, threadId, model }),
+    body: JSON.stringify({ message, threadId, model, thinkingEffort }),
     signal,
   })
 }

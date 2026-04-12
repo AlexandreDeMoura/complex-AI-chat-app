@@ -12,11 +12,13 @@ import type {
   ChatMessage,
   InterruptState,
   ModelOption,
+  ThinkingEffort,
   ThreadSummary,
   ToolResultData,
 } from '@/features/chat/model'
 
 type ResumeAction = 'approve' | 'reject'
+const THINKING_EFFORTS: ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
 
 interface RunAssistantStreamOptions {
   assistantMessageId: string
@@ -30,10 +32,12 @@ export interface ChatViewModel {
   threadHistory: ThreadSummary[]
   availableModels: ModelOption[]
   selectedModel: string
+  selectedThinkingEffort: ThinkingEffort
   isThreadHistoryLoading: boolean
   isLoading: boolean
   interrupt: InterruptState | null
   setSelectedModel: (modelId: string) => void
+  setSelectedThinkingEffort: (effort: ThinkingEffort) => void
   sendMessage: (text: string) => Promise<void>
   stopGeneration: () => void
   resumeInterrupt: (action: ResumeAction, reason?: string) => Promise<void>
@@ -63,6 +67,8 @@ export function useChatViewModel(): ChatViewModel {
   const [threadHistory, setThreadHistory] = useState<ThreadSummary[]>([])
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([])
   const [selectedModel, setSelectedModelState] = useState('')
+  const [selectedThinkingEffort, setSelectedThinkingEffortState] =
+    useState<ThinkingEffort>('off')
   const [isThreadHistoryLoading, setIsThreadHistoryLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
@@ -115,14 +121,21 @@ export function useChatViewModel(): ChatViewModel {
   const setSelectedModel = useCallback((modelId: string) => {
     if (!modelId) return
 
-    setSelectedModelState((currentModel) => {
-      if (availableModels.some((model) => model.id === modelId)) {
-        return modelId
-      }
+    const nextModel = availableModels.find((model) => model.id === modelId)
+    if (!nextModel) return
 
-      return currentModel
-    })
+    setSelectedModelState(nextModel.id)
+
+    if (!nextModel.supportsThinking) {
+      setSelectedThinkingEffortState('off')
+    }
   }, [availableModels])
+
+  const setSelectedThinkingEffort = useCallback((effort: ThinkingEffort) => {
+    if (!THINKING_EFFORTS.includes(effort)) return
+
+    setSelectedThinkingEffortState(effort)
+  }, [])
 
   useEffect(
     () => () => {
@@ -154,6 +167,11 @@ export function useChatViewModel(): ChatViewModel {
   useEffect(() => {
     void loadThreadHistory()
   }, [loadThreadHistory])
+
+  const selectedModelOption = availableModels.find((model) => model.id === selectedModel)
+  const effectiveThinkingEffort: ThinkingEffort = selectedModelOption?.supportsThinking
+    ? selectedThinkingEffort
+    : 'off'
 
   const readSSEStream = useCallback(
     async (
@@ -302,6 +320,7 @@ export function useChatViewModel(): ChatViewModel {
             message: trimmedText,
             threadId: threadIdRef.current,
             model: selectedModel || undefined,
+            thinkingEffort: effectiveThinkingEffort,
             signal,
           }),
         onCompleted: () => {
@@ -309,7 +328,14 @@ export function useChatViewModel(): ChatViewModel {
         },
       })
     },
-    [createMessageId, isLoading, loadThreadHistory, runAssistantStream, selectedModel],
+    [
+      createMessageId,
+      effectiveThinkingEffort,
+      isLoading,
+      loadThreadHistory,
+      runAssistantStream,
+      selectedModel,
+    ],
   )
 
   const resumeInterrupt = useCallback(
@@ -370,6 +396,7 @@ export function useChatViewModel(): ChatViewModel {
             message: humanMessageContent,
             threadId: threadIdRef.current,
             model: selectedModel || undefined,
+            thinkingEffort: effectiveThinkingEffort,
             signal,
           }),
         onCompleted: () => {
@@ -377,7 +404,15 @@ export function useChatViewModel(): ChatViewModel {
         },
       })
     },
-    [createMessageId, isLoading, loadThreadHistory, messages, runAssistantStream, selectedModel],
+    [
+      createMessageId,
+      effectiveThinkingEffort,
+      isLoading,
+      loadThreadHistory,
+      messages,
+      runAssistantStream,
+      selectedModel,
+    ],
   )
 
   const startNewThread = useCallback(() => {
@@ -392,11 +427,15 @@ export function useChatViewModel(): ChatViewModel {
     if (threadId === threadIdRef.current) return
 
     const selectedThread = threadHistory.find((thread) => thread.thread_id === threadId)
-    if (
-      selectedThread?.model &&
-      availableModels.some((model) => model.id === selectedThread.model)
-    ) {
-      setSelectedModelState(selectedThread.model)
+    if (selectedThread?.model) {
+      const nextModel = availableModels.find((model) => model.id === selectedThread.model)
+      if (nextModel) {
+        setSelectedModelState(nextModel.id)
+
+        if (!nextModel.supportsThinking) {
+          setSelectedThinkingEffortState('off')
+        }
+      }
     }
 
     abortControllerRef.current?.abort()
@@ -412,10 +451,12 @@ export function useChatViewModel(): ChatViewModel {
     threadHistory,
     availableModels,
     selectedModel,
+    selectedThinkingEffort,
     isThreadHistoryLoading,
     isLoading,
     interrupt,
     setSelectedModel,
+    setSelectedThinkingEffort,
     sendMessage,
     stopGeneration,
     resumeInterrupt,

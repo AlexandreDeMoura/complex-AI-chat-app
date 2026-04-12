@@ -30,8 +30,11 @@ export interface ThreadSummary {
   first_message_preview: string
 }
 
+export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'max'
+
 export interface ModelOption {
   id: string
   name: string
   provider: string
+  supportsThinking: boolean
 }
