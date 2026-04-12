@@ -30,7 +30,8 @@ export interface ThreadSummary {
   first_message_preview: string
 }
 
-export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'max'
+export const THINKING_EFFORTS = ['off', 'low', 'medium', 'high', 'max'] as const
+export type ThinkingEffort = (typeof THINKING_EFFORTS)[number]
 
 export interface ModelOption {
   id: string

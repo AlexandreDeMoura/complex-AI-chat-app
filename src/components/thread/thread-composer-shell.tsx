@@ -10,8 +10,24 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import type { ModelOption } from '@/features/chat/model'
+import {
+  THINKING_EFFORTS,
+  type ModelOption,
+  type ThinkingEffort,
+} from '@/features/chat/model'
 import { cn } from '@/lib/utils'
+
+const THINKING_EFFORT_LABELS: Record<ThinkingEffort, string> = {
+  off: 'Off',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  max: 'Max',
+}
+
+function isThinkingEffort(value: string): value is ThinkingEffort {
+  return (THINKING_EFFORTS as readonly string[]).includes(value)
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
@@ -30,11 +46,13 @@ interface ThreadComposerShellProps {
   hideToolCalls: boolean
   availableModels: ModelOption[]
   selectedModel: string
+  selectedThinkingEffort: ThinkingEffort
   isModelSelectorDisabled: boolean
   onInputChange: (value: string) => void
   onSend: (text: string) => void
   onStop: () => void
   onSelectModel: (modelId: string) => void
+  onSelectThinkingEffort: (effort: ThinkingEffort) => void
   onToggleHideToolCalls: () => void
 }
 
@@ -44,13 +62,17 @@ export function ThreadComposerShell({
   hideToolCalls,
   availableModels,
   selectedModel,
+  selectedThinkingEffort,
   isModelSelectorDisabled,
   onInputChange,
   onSend,
   onStop,
   onSelectModel,
+  onSelectThinkingEffort,
   onToggleHideToolCalls,
 }: ThreadComposerShellProps) {
+  const selectedModelOption = availableModels.find((m) => m.id === selectedModel)
+  const showThinkingEffort = selectedModelOption?.supportsThinking ?? false
   const [isDragOver, setIsDragOver] = useState(false)
 
   const handleSubmit = () => {
@@ -129,6 +151,28 @@ export function ThreadComposerShell({
                 ))}
               </SelectContent>
             </Select>
+
+            {showThinkingEffort && (
+              <Select
+                value={selectedThinkingEffort}
+                onValueChange={(value) => {
+                  if (isThinkingEffort(value)) {
+                    onSelectThinkingEffort(value)
+                  }
+                }}
+              >
+                <SelectTrigger className="h-7 min-w-[80px] max-w-[110px] rounded-full px-2.5 text-xs">
+                  <SelectValue placeholder="Thinking" />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {THINKING_EFFORTS.map((effort) => (
+                    <SelectItem key={effort} value={effort}>
+                      {THINKING_EFFORT_LABELS[effort]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {isLoading ? (

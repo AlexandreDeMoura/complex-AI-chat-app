@@ -8,17 +8,17 @@ import {
   openResumeStream,
   readChatStream,
 } from '@/features/chat/data'
-import type {
-  ChatMessage,
-  InterruptState,
-  ModelOption,
-  ThinkingEffort,
-  ThreadSummary,
-  ToolResultData,
+import {
+  THINKING_EFFORTS,
+  type ChatMessage,
+  type InterruptState,
+  type ModelOption,
+  type ThinkingEffort,
+  type ThreadSummary,
+  type ToolResultData,
 } from '@/features/chat/model'
 
 type ResumeAction = 'approve' | 'reject'
-const THINKING_EFFORTS: ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
 
 interface RunAssistantStreamOptions {
   assistantMessageId: string
@@ -134,8 +134,16 @@ export function useChatViewModel(): ChatViewModel {
   const setSelectedThinkingEffort = useCallback((effort: ThinkingEffort) => {
     if (!THINKING_EFFORTS.includes(effort)) return
 
+    const supportsThinking = availableModels.some(
+      (model) => model.id === selectedModel && model.supportsThinking,
+    )
+    if (!supportsThinking) {
+      setSelectedThinkingEffortState('off')
+      return
+    }
+
     setSelectedThinkingEffortState(effort)
-  }, [])
+  }, [availableModels, selectedModel])
 
   useEffect(
     () => () => {

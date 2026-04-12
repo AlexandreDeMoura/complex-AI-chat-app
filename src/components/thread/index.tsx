@@ -20,10 +20,12 @@ export function Thread() {
     threadHistory,
     availableModels,
     selectedModel,
+    selectedThinkingEffort,
     isThreadHistoryLoading,
     isLoading,
     interrupt,
     setSelectedModel,
+    setSelectedThinkingEffort,
     sendMessage,
     stopGeneration,
     resumeInterrupt,
@@ -108,8 +110,10 @@ export function Thread() {
                   hideToolCalls={hideToolCalls}
                   availableModels={availableModels}
                   selectedModel={selectedModel}
+                  selectedThinkingEffort={selectedThinkingEffort}
                   isModelSelectorDisabled={isModelLocked}
                   onSelectModel={setSelectedModel}
+                  onSelectThinkingEffort={setSelectedThinkingEffort}
                   onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
                 />
               </div>
@@ -141,8 +145,10 @@ export function Thread() {
                 hideToolCalls={hideToolCalls}
                 availableModels={availableModels}
                 selectedModel={selectedModel}
+                selectedThinkingEffort={selectedThinkingEffort}
                 isModelSelectorDisabled={isModelLocked}
                 onSelectModel={setSelectedModel}
+                onSelectThinkingEffort={setSelectedThinkingEffort}
                 onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
               />
             </div>
