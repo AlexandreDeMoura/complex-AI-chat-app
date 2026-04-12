@@ -6,8 +6,8 @@ The chat feature now follows an explicit MVVM structure so rendering, orchestrat
 ### Tech Stack
 - **Frontend:** React 19 + TypeScript, Vite 8, Tailwind CSS 4, Radix UI, Framer Motion
 - **Backend:** Express 5 (Node.js, port 8788), Zod validation
-- **AI:** LangChain Core + LangGraph (`createAgent`, `MemorySaver`), ChatOpenAI/ChatAnthropic (provider inferred from `LLM_MODEL`; default `gpt-4.1-mini`)
-- Dev proxy: Vite forwards `/api/*` → `:8788`; env vars: `OPENAI_API_KEY`, `LLM_MODEL`, `PORT`
+- **AI:** LangChain Core + LangGraph (`createAgent`, `MemorySaver`) with a model registry and lazy per-model agent cache (`ChatOpenAI`, `ChatAnthropic`, `ChatMistralAI`)
+- Dev proxy: Vite forwards `/api/*` → `:8788`; env vars: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, `PORT`
 
 ### Architecture
 
@@ -16,9 +16,9 @@ src/
   components/thread/     # View layer: chat container + presentational thread components
   components/ui/         # Radix-based design system primitives
   features/chat/
-    model/               # Domain types shared across chat flow (messages, interrupts, thread summaries)
-    data/                # API clients and SSE parsing (health, threads, stream, resume)
-    view-model/          # useChatViewModel orchestration hook for send/stop/resume/regenerate/thread ops
+    model/               # Domain types shared across chat flow (messages, interrupts, thread summaries, model options)
+    data/                # API clients and SSE parsing (health, threads, models, stream, resume)
+    view-model/          # useChatViewModel orchestration hook for send/stop/resume/regenerate/thread/model ops
   hooks/                 # useDarkMode, useMediaQuery, useCopyToClipboard
 server/
   index.js               # Interface layer: route definitions, validation, HTTP/SSE serialization
@@ -29,31 +29,32 @@ server/
     tools.js             # Domain layer: tool definitions with interrupt behavior
     message-utils.js     # Domain layer: model content parsing helpers
   infrastructure/
-    agent.js             # Infrastructure layer: model provider selection + agent bootstrap
-    thread-store.js      # Infrastructure layer: in-memory thread repository (upsert/get/list)
+    agent.js             # Infrastructure layer: model registry + lazy per-model agent cache
+    thread-store.js      # Infrastructure layer: in-memory thread repository + per-thread model lock
 ```
 
 **Backend routes:**
 - `GET /api/health` — health check used by the chat ViewModel
 - `GET /api/threads` — thread summaries for history sidebar
-- `POST /api/chat` — non-streaming, auto-approves interrupts
-- `POST /api/chat/stream` — SSE streaming with interrupt support
-- `POST /api/chat/resume` — resumes a paused agent with approve/reject decision
+- `GET /api/models` — available model options filtered by configured provider keys
+- `POST /api/chat` — non-streaming, auto-approves interrupts (accepts optional `model`)
+- `POST /api/chat/stream` — SSE streaming with interrupt support (accepts optional `model`)
+- `POST /api/chat/resume` — resumes a paused agent with approve/reject decision (model resolved from thread store)
 
-**State:** threads are in-memory (Map); no database. Thread IDs are UUIDs generated on the frontend and passed on every request.
+**State:** threads are in-memory (Map); no database. Thread IDs are UUIDs generated on the frontend and passed on every request. The model is persisted on first thread write and then treated as immutable for that thread.
 
 ### Chat MVVM Boundaries
 
 - **View (`src/components/thread`)**: Rendering and local UI-only state (e.g., input text, sidebar open/close, hide tool calls). No direct fetch/SSE parsing.
-- **ViewModel (`src/features/chat/view-model/use-chat-view-model.ts`)**: Chat orchestration and state transitions for send, stop, interrupt approve/reject, regenerate, new thread, thread select, and history refresh.
-- **Model (`src/features/chat/model`)**: Shared domain types (`ChatMessage`, `InterruptState`, tool payloads, `ThreadSummary`).
-- **Data (`src/features/chat/data`)**: Backend integration (`/api/health`, `/api/threads`, `/api/chat/stream`, `/api/chat/resume`) and typed SSE event parsing.
+- **ViewModel (`src/features/chat/view-model/use-chat-view-model.ts`)**: Chat orchestration and state transitions for send, stop, interrupt approve/reject, regenerate, new thread, thread select, history refresh, and model selection.
+- **Model (`src/features/chat/model`)**: Shared domain types (`ChatMessage`, `InterruptState`, tool payloads, `ThreadSummary`, `ModelOption`).
+- **Data (`src/features/chat/data`)**: Backend integration (`/api/health`, `/api/threads`, `/api/models`, `/api/chat/stream`, `/api/chat/resume`) and typed SSE event parsing.
 
 ### AI & Orchestration
 
-Agent is created once at startup:
+Agents are created lazily per model ID and cached:
 ```js
-const agent = createAgent({ model, tools, checkpointer: new MemorySaver(), systemPrompt })
+const agent = getAgent(modelId) // createAgent(...) on first use for each model
 ```
 Current bootstrap location: `server/infrastructure/agent.js`.
 
@@ -69,7 +70,7 @@ Current tool location: `server/domain/tools.js`.
 - Tool calls `interrupt()` → backend emits `{ type: 'interrupt', toolCalls }` → ViewModel stores interrupt state → UI renders `ThreadInterruptSection`/`InterruptView`
 - User approves/rejects → `POST /api/chat/resume` with `Command({ resume })` → graph continues
 
-Thread memory is scoped by `thread_id` via LangGraph's checkpointer config.
+Thread memory is scoped by `thread_id` via LangGraph's checkpointer config, and `/api/chat/resume` always reuses the model persisted for that thread.
 
 ---
 
