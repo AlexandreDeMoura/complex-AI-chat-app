@@ -1,6 +1,6 @@
 import { Command } from '@langchain/langgraph'
 import { extractMessageText } from '../domain/message-utils.js'
-import { agent } from '../infrastructure/agent.js'
+import { getAgent } from '../infrastructure/agent.js'
 import { threadStore } from '../infrastructure/thread-store.js'
 
 const RECURSION_LIMIT = 10
@@ -14,7 +14,7 @@ const writeSseEvent = (res, payload) => {
 }
 
 // WHY: interrupt state is only visible through graph state after stream completion.
-const emitInterruptIfPending = async (threadId, res) => {
+const emitInterruptIfPending = async (agent, threadId, res) => {
   const state = await agent.graph.getState(getThreadConfig(threadId))
   if (!state.next || state.next.length === 0) {
     return
@@ -33,7 +33,7 @@ const emitInterruptIfPending = async (threadId, res) => {
   }
 }
 
-const streamAgentToSSE = async (stream, res, threadId) => {
+const streamAgentToSSE = async (stream, res, threadId, agent) => {
   for await (const [chunk] of stream) {
     if (res.writableEnded) {
       break
@@ -56,11 +56,12 @@ const streamAgentToSSE = async (stream, res, threadId) => {
     }
   }
 
-  await emitInterruptIfPending(threadId, res)
+  await emitInterruptIfPending(agent, threadId, res)
 }
 
-export const sendMessage = async ({ message, threadId }) => {
-  threadStore.upsert(threadId, message)
+export const sendMessage = async ({ message, threadId, model }) => {
+  const agent = getAgent(model)
+  threadStore.upsert(threadId, message, model)
 
   const config = { ...getThreadConfig(threadId), recursionLimit: RECURSION_LIMIT }
   let result = await agent.invoke(
@@ -87,8 +88,9 @@ export const sendMessage = async ({ message, threadId }) => {
   return { reply }
 }
 
-export const streamMessage = async ({ message, threadId, res, signal }) => {
-  threadStore.upsert(threadId, message)
+export const streamMessage = async ({ message, threadId, model, res, signal }) => {
+  const agent = getAgent(model)
+  threadStore.upsert(threadId, message, model)
 
   const stream = await agent.stream(
     { messages: [{ role: 'user', content: message }] },
@@ -100,7 +102,7 @@ export const streamMessage = async ({ message, threadId, res, signal }) => {
     },
   )
 
-  await streamAgentToSSE(stream, res, threadId)
+  await streamAgentToSSE(stream, res, threadId, agent)
 
   if (!res.writableEnded) {
     writeSseEvent(res, { type: 'done' })
@@ -109,6 +111,16 @@ export const streamMessage = async ({ message, threadId, res, signal }) => {
 }
 
 export const resumeStream = async ({ threadId, action, reason, res, signal }) => {
+  const thread = threadStore.get(threadId)
+  if (!thread) {
+    throw new Error(`Thread "${threadId}" not found.`)
+  }
+
+  if (!thread.model) {
+    throw new Error(`Thread "${threadId}" has no model configured.`)
+  }
+
+  const agent = getAgent(thread.model)
   const resumeValue =
     action === 'approve'
       ? { action: 'approve' }
@@ -124,7 +136,7 @@ export const resumeStream = async ({ threadId, action, reason, res, signal }) =>
     },
   )
 
-  await streamAgentToSSE(stream, res, threadId)
+  await streamAgentToSSE(stream, res, threadId, agent)
 
   if (!res.writableEnded) {
     writeSseEvent(res, { type: 'done' })

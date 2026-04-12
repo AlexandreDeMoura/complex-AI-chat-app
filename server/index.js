@@ -4,6 +4,7 @@ import express from 'express'
 import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
 import { listThreads } from './application/thread-service.js'
+import { getAvailableModels } from './infrastructure/agent.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 8788)
@@ -11,6 +12,7 @@ const port = Number(process.env.PORT ?? 8788)
 const requestSchema = z.object({
   message: z.string().trim().min(1, 'Message is required.'),
   threadId: z.string().trim().min(1, 'threadId is required.'),
+  model: z.string().optional(),
 })
 
 const resumeSchema = z.object({
@@ -36,10 +38,30 @@ app.get('/api/threads', (_req, res) => {
   }
 })
 
+const resolveRequestModel = (requestedModel) => {
+  const models = getAvailableModels()
+  if (models.length === 0) {
+    throw new Error('No models are available. Configure at least one provider API key.')
+  }
+
+  return requestedModel ?? models[0].id
+}
+
+app.get('/api/models', (_req, res) => {
+  try {
+    res.json(getAvailableModels())
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error.'
+    res.status(400).json({ error: message })
+  }
+})
+
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, threadId } = requestSchema.parse(req.body)
-    const response = await sendMessage({ message, threadId })
+    const { message, threadId, model: requestedModel } = requestSchema.parse(req.body)
+    const model = resolveRequestModel(requestedModel)
+    const response = await sendMessage({ message, threadId, model })
     res.json(response)
   } catch (error) {
     const message =
@@ -55,7 +77,8 @@ app.post('/api/chat/stream', async (req, res) => {
   res.on('close', () => abortController.abort())
 
   try {
-    const { message, threadId } = requestSchema.parse(req.body)
+    const { message, threadId, model: requestedModel } = requestSchema.parse(req.body)
+    const model = resolveRequestModel(requestedModel)
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
@@ -63,7 +86,13 @@ app.post('/api/chat/stream', async (req, res) => {
     res.flushHeaders()
     headersSent = true
 
-    await streamMessage({ message, threadId, res, signal: abortController.signal })
+    await streamMessage({
+      message,
+      threadId,
+      model,
+      res,
+      signal: abortController.signal,
+    })
   } catch (error) {
     if (abortController.signal.aborted) {
       if (!res.writableEnded) res.end()
