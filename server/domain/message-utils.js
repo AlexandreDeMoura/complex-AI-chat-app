@@ -15,7 +15,6 @@ export const extractMessageText = (content) => {
         return ''
       })
       .join('\n')
-      .trim()
   }
 
   return ''
