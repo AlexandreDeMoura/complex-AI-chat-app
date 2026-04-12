@@ -99,9 +99,7 @@ export function Thread() {
           {!hasMessages ? (
             <div className="flex-1 overflow-y-auto">
               <div className="mt-[25vh] flex w-full flex-col items-center px-4">
-                <ChatLogo className="mb-4 h-10 w-10" />
-                <h1 className="text-xl font-semibold tracking-tight">Agent Chat</h1>
-                <p className="mb-8 text-sm text-muted-foreground">Ask me anything.</p>
+                <h1 className="text-4xl font-medium tracking-tight mb-10 text-[#373734] dark:text-[#C3C2B7]" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>System Designer</h1>
                 <ThreadComposerShell
                   input={input}
                   onInputChange={setInput}

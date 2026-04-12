@@ -33,7 +33,7 @@ export function ThreadHeader({
             className="size-8 p-1.5"
             onClick={onToggleSidebar}
           >
-            <PanelRightClose className="size-5" />
+            <PanelRightClose className="size-5 text-[#373734] dark:text-[#C3C2B7]" />
           </TooltipIconButton>
 
           {hasMessages && (
@@ -44,9 +44,8 @@ export function ThreadHeader({
               }}
               transition={springTransition}
             >
-              <ChatLogo className="ml-1" />
-              <span className="text-xl font-semibold tracking-tight">
-                Agent Chat
+              <span className="text-xl font-me  dium tracking-tight text-[#373734] dark:text-[#C3C2B7]" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                System Designer
               </span>
             </motion.div>
           )}

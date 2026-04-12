@@ -73,7 +73,7 @@ export function ThreadComposerShell({
   return (
     <div
       className={cn(
-        'bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all',
+        'bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-[20px] border border-transparent shadow-[0_0.25rem_1.25rem_hsl(var(--always-black)/3.5%),0_0_0_0.5px_hsla(var(--border-300)/0.15)] hover:shadow-[0_0.25rem_1.25rem_hsl(var(--always-black)/3.5%),0_0_0_0.5px_hsla(var(--border-200)/0.3)] focus-within:shadow-[0_0.25rem_1.25rem_hsl(var(--always-black)/7.5%),0_0_0_0.5px_hsla(var(--border-200)/0.3)] transition-all duration-200',
         isDragOver && 'border-primary border-2 border-dotted',
       )}
       onDragOver={(event) => {
@@ -92,14 +92,14 @@ export function ThreadComposerShell({
       >
         <textarea
           aria-label="Message input"
-          className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:outline-none placeholder:text-muted-foreground/50 dark:placeholder:text-foreground/30"
+          className="field-sizing-content resize-none border-none bg-transparent p-5 pb-0 shadow-none ring-0 outline-none focus:outline-none placeholder:text-muted-foreground"
           placeholder="Type your message..."
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
           rows={1}
         />
-        <div className="flex items-center justify-between gap-2 p-2 pt-4">
+        <div className="flex items-center justify-between gap-2 p-3.5 pt-4">
           <div className="flex min-w-0 items-center gap-2">
             <Switch
               id="hide-tool-calls"
