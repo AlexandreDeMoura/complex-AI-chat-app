@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   checkChatHealth,
+  fetchAvailableModels,
   fetchThreadHistory,
   openChatStream,
   openResumeStream,
@@ -10,6 +11,7 @@ import {
 import type {
   ChatMessage,
   InterruptState,
+  ModelOption,
   ThreadSummary,
   ToolResultData,
 } from '@/features/chat/model'
@@ -26,9 +28,12 @@ export interface ChatViewModel {
   currentThreadId: string
   messages: ChatMessage[]
   threadHistory: ThreadSummary[]
+  availableModels: ModelOption[]
+  selectedModel: string
   isThreadHistoryLoading: boolean
   isLoading: boolean
   interrupt: InterruptState | null
+  setSelectedModel: (modelId: string) => void
   sendMessage: (text: string) => Promise<void>
   stopGeneration: () => void
   resumeInterrupt: (action: ResumeAction, reason?: string) => Promise<void>
@@ -56,6 +61,8 @@ function findHumanMessageBeforeAssistant(
 export function useChatViewModel(): ChatViewModel {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [threadHistory, setThreadHistory] = useState<ThreadSummary[]>([])
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([])
+  const [selectedModel, setSelectedModelState] = useState('')
   const [isThreadHistoryLoading, setIsThreadHistoryLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
@@ -70,13 +77,52 @@ export function useChatViewModel(): ChatViewModel {
   }, [])
 
   useEffect(() => {
-    checkChatHealth().catch(() => {
-      toast.error('Unable to reach the backend server', {
-        description: 'Make sure the server is running with: node server/index.js',
-        duration: 10000,
-      })
-    })
+    let isMounted = true
+
+    void Promise.allSettled([checkChatHealth(), fetchAvailableModels()]).then(
+      ([healthResult, modelsResult]) => {
+        if (healthResult.status === 'rejected') {
+          toast.error('Unable to reach the backend server', {
+            description: 'Make sure the server is running with: node server/index.js',
+            duration: 10000,
+          })
+        }
+
+        if (modelsResult.status === 'fulfilled') {
+          if (!isMounted) return
+
+          const models = modelsResult.value
+          setAvailableModels(models)
+          setSelectedModelState((currentModel) => {
+            if (currentModel && models.some((model) => model.id === currentModel)) {
+              return currentModel
+            }
+
+            return models[0]?.id ?? ''
+          })
+          return
+        }
+
+        toast.error('Failed to load models')
+      },
+    )
+
+    return () => {
+      isMounted = false
+    }
   }, [])
+
+  const setSelectedModel = useCallback((modelId: string) => {
+    if (!modelId) return
+
+    setSelectedModelState((currentModel) => {
+      if (availableModels.some((model) => model.id === modelId)) {
+        return modelId
+      }
+
+      return currentModel
+    })
+  }, [availableModels])
 
   useEffect(
     () => () => {
@@ -255,6 +301,7 @@ export function useChatViewModel(): ChatViewModel {
           openChatStream({
             message: trimmedText,
             threadId: threadIdRef.current,
+            model: selectedModel || undefined,
             signal,
           }),
         onCompleted: () => {
@@ -262,7 +309,7 @@ export function useChatViewModel(): ChatViewModel {
         },
       })
     },
-    [createMessageId, isLoading, loadThreadHistory, runAssistantStream],
+    [createMessageId, isLoading, loadThreadHistory, runAssistantStream, selectedModel],
   )
 
   const resumeInterrupt = useCallback(
@@ -322,6 +369,7 @@ export function useChatViewModel(): ChatViewModel {
           openChatStream({
             message: humanMessageContent,
             threadId: threadIdRef.current,
+            model: selectedModel || undefined,
             signal,
           }),
         onCompleted: () => {
@@ -329,7 +377,7 @@ export function useChatViewModel(): ChatViewModel {
         },
       })
     },
-    [createMessageId, isLoading, loadThreadHistory, messages, runAssistantStream],
+    [createMessageId, isLoading, loadThreadHistory, messages, runAssistantStream, selectedModel],
   )
 
   const startNewThread = useCallback(() => {
@@ -343,20 +391,31 @@ export function useChatViewModel(): ChatViewModel {
   const selectThread = useCallback((threadId: string) => {
     if (threadId === threadIdRef.current) return
 
+    const selectedThread = threadHistory.find((thread) => thread.thread_id === threadId)
+    if (
+      selectedThread?.model &&
+      availableModels.some((model) => model.id === selectedThread.model)
+    ) {
+      setSelectedModelState(selectedThread.model)
+    }
+
     abortControllerRef.current?.abort()
     setMessages([])
     setIsLoading(false)
     setInterrupt(null)
     threadIdRef.current = threadId
-  }, [])
+  }, [availableModels, threadHistory])
 
   return {
     currentThreadId: threadIdRef.current,
     messages,
     threadHistory,
+    availableModels,
+    selectedModel,
     isThreadHistoryLoading,
     isLoading,
     interrupt,
+    setSelectedModel,
     sendMessage,
     stopGeneration,
     resumeInterrupt,

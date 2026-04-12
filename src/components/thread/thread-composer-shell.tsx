@@ -2,16 +2,39 @@ import { useState } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import type { ModelOption } from '@/features/chat/model'
 import { cn } from '@/lib/utils'
+
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  mistral: 'Mistral',
+}
+
+function formatModelLabel(model: ModelOption): string {
+  const provider = PROVIDER_LABELS[model.provider] ?? model.provider
+  return `${model.name} · ${provider}`
+}
 
 interface ThreadComposerShellProps {
   input: string
   isLoading: boolean
   hideToolCalls: boolean
+  availableModels: ModelOption[]
+  selectedModel: string
+  isModelSelectorDisabled: boolean
   onInputChange: (value: string) => void
   onSend: (text: string) => void
   onStop: () => void
+  onSelectModel: (modelId: string) => void
   onToggleHideToolCalls: () => void
 }
 
@@ -19,9 +42,13 @@ export function ThreadComposerShell({
   input,
   isLoading,
   hideToolCalls,
+  availableModels,
+  selectedModel,
+  isModelSelectorDisabled,
   onInputChange,
   onSend,
   onStop,
+  onSelectModel,
   onToggleHideToolCalls,
 }: ThreadComposerShellProps) {
   const [isDragOver, setIsDragOver] = useState(false)
@@ -72,8 +99,8 @@ export function ThreadComposerShell({
           onKeyDown={handleKeyDown}
           rows={1}
         />
-        <div className="flex items-center justify-between p-2 pt-4">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2 p-2 pt-4">
+          <div className="flex min-w-0 items-center gap-2">
             <Switch
               id="hide-tool-calls"
               checked={hideToolCalls}
@@ -85,6 +112,23 @@ export function ThreadComposerShell({
             >
               Hide Tool Calls
             </Label>
+
+            <Select
+              value={selectedModel}
+              onValueChange={onSelectModel}
+              disabled={isModelSelectorDisabled || availableModels.length === 0}
+            >
+              <SelectTrigger className="h-7 w-[44vw] min-w-[120px] max-w-[220px] rounded-full px-2.5 text-xs">
+                <SelectValue placeholder="Select model" />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {availableModels.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {formatModelLabel(model)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {isLoading ? (

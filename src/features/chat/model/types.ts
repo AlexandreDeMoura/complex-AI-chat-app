@@ -24,6 +24,7 @@ export interface ChatMessage {
 
 export interface ThreadSummary {
   thread_id: string
+  model?: string
   created_at: string
   updated_at: string
   first_message_preview: string

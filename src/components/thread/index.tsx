@@ -19,9 +19,12 @@ export function Thread() {
     currentThreadId,
     messages,
     threadHistory,
+    availableModels,
+    selectedModel,
     isThreadHistoryLoading,
     isLoading,
     interrupt,
+    setSelectedModel,
     sendMessage,
     stopGeneration,
     resumeInterrupt,
@@ -32,6 +35,8 @@ export function Thread() {
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const hasMessages = messages.length > 0
+  const selectedThread = threadHistory.find((thread) => thread.thread_id === currentThreadId)
+  const isModelLocked = isLoading || hasMessages || Boolean(selectedThread)
   const { isDark, toggleDarkMode } = useDarkMode()
 
   const handleNewThread = useCallback(() => {
@@ -104,6 +109,10 @@ export function Thread() {
                   onStop={stopGeneration}
                   isLoading={isLoading}
                   hideToolCalls={hideToolCalls}
+                  availableModels={availableModels}
+                  selectedModel={selectedModel}
+                  isModelSelectorDisabled={isModelLocked}
+                  onSelectModel={setSelectedModel}
                   onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
                 />
               </div>
@@ -133,6 +142,10 @@ export function Thread() {
                 onStop={stopGeneration}
                 isLoading={isLoading}
                 hideToolCalls={hideToolCalls}
+                availableModels={availableModels}
+                selectedModel={selectedModel}
+                isModelSelectorDisabled={isModelLocked}
+                onSelectModel={setSelectedModel}
                 onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
               />
             </div>
