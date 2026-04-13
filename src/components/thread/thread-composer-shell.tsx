@@ -2,14 +2,9 @@ import { useState } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { EffortSelector } from '@/components/thread/effort-selector'
+import { ModelSelector } from '@/components/thread/model-selector'
 import {
   THINKING_EFFORTS,
   type ModelOption,
@@ -17,27 +12,23 @@ import {
 } from '@/features/chat/model'
 import { cn } from '@/lib/utils'
 
-const THINKING_EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  off: 'Off',
+const THINKING_EFFORT_LABELS: Record<Exclude<ThinkingEffort, 'off'>, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
   max: 'Max',
 }
 
-function isThinkingEffort(value: string): value is ThinkingEffort {
-  return (THINKING_EFFORTS as readonly string[]).includes(value)
-}
+const SELECTABLE_THINKING_EFFORTS = THINKING_EFFORTS.filter(
+  (effort): effort is Exclude<ThinkingEffort, 'off'> => effort !== 'off',
+)
 
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  mistral: 'Mistral',
-}
+const DEFAULT_ACTIVE_EFFORT: ThinkingEffort = 'medium'
 
-function formatModelLabel(model: ModelOption): string {
-  const provider = PROVIDER_LABELS[model.provider] ?? model.provider
-  return `${model.name} · ${provider}`
+function isSelectableEffort(
+  value: string,
+): value is Exclude<ThinkingEffort, 'off'> {
+  return (SELECTABLE_THINKING_EFFORTS as readonly string[]).includes(value)
 }
 
 interface ThreadComposerShellProps {
@@ -123,7 +114,7 @@ export function ThreadComposerShell({
         />
         <div className="flex items-center justify-between gap-2 p-3.5 pt-4">
           <div className="flex min-w-0 items-center gap-2">
-            <Switch
+            {/* <Switch
               id="hide-tool-calls"
               checked={hideToolCalls}
               onCheckedChange={onToggleHideToolCalls}
@@ -133,46 +124,28 @@ export function ThreadComposerShell({
               className="text-muted-foreground dark:text-foreground/50 cursor-pointer text-xs"
             >
               Hide Tool Calls
-            </Label>
+            </Label> */}
 
-            <Select
-              value={selectedModel}
-              onValueChange={onSelectModel}
+            <ModelSelector
+              availableModels={availableModels}
+              selectedModel={selectedModel}
+              onSelectModel={onSelectModel}
+              extendedThinking={selectedThinkingEffort !== 'off'}
+              onExtendedThinkingChange={(value) => {
+                onSelectThinkingEffort(value ? DEFAULT_ACTIVE_EFFORT : 'off')
+              }}
               disabled={isModelSelectorDisabled || availableModels.length === 0}
-            >
-              <SelectTrigger className="h-7 w-[44vw] min-w-[120px] max-w-[220px] rounded-full px-2.5 text-xs">
-                <SelectValue placeholder="Select model" />
-              </SelectTrigger>
-              <SelectContent align="start">
-                {availableModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {formatModelLabel(model)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
 
-            {showThinkingEffort && (
-              <Select
-                value={selectedThinkingEffort}
-                onValueChange={(value) => {
-                  if (isThinkingEffort(value)) {
-                    onSelectThinkingEffort(value)
-                  }
-                }}
-              >
-                <SelectTrigger className="h-7 min-w-[80px] max-w-[110px] rounded-full px-2.5 text-xs">
-                  <SelectValue placeholder="Thinking" />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  {THINKING_EFFORTS.map((effort) => (
-                    <SelectItem key={effort} value={effort}>
-                      {THINKING_EFFORT_LABELS[effort]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            {showThinkingEffort &&
+              isSelectableEffort(selectedThinkingEffort) && (
+                <EffortSelector
+                  efforts={SELECTABLE_THINKING_EFFORTS}
+                  selectedEffort={selectedThinkingEffort}
+                  effortLabels={THINKING_EFFORT_LABELS}
+                  onSelectEffort={onSelectThinkingEffort}
+                />
+              )}
           </div>
 
           {isLoading ? (
