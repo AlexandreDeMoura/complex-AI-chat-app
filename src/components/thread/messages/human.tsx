@@ -35,7 +35,7 @@ export function HumanMessage({ content }: HumanMessageProps) {
           <Trash2Icon className="size-3.5" />
         </TooltipIconButton>
       </div>
-      <p className="bg-muted ml-2 max-w-[75%] w-fit rounded-3xl px-4 py-2 whitespace-pre-wrap">
+      <p className="bg-muted ml-2 max-w-[75%] w-fit rounded-xl px-5 py-2.5 whitespace-pre-wrap">
         {content}
       </p>
     </motion.div>

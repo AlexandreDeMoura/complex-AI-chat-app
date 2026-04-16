@@ -43,7 +43,7 @@ export function ThreadMessageList({
           '[&::-webkit-scrollbar-track]:bg-transparent',
         )}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-8 pb-16">
+        <div className="mx-auto flex w-full max-w-[52.8rem] flex-col gap-8 px-4 pt-8 pb-16">
           {messages.map((message) =>
             message.role === 'human' ? (
               <HumanMessage key={message.id} content={message.content} />
