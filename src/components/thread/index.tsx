@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import { ThreadComposerShell } from '@/components/thread/thread-composer-shell'
 import { ThreadHeader } from '@/components/thread/thread-header'
 import { ThreadMessageList } from '@/components/thread/thread-message-list'
@@ -11,6 +12,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 const springTransition = { type: 'spring', stiffness: 300, damping: 30 } as const
 
 export function Thread() {
+  const navigate = useNavigate()
   const [input, setInput] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [hideToolCalls, setHideToolCalls] = useState(false)
@@ -68,6 +70,11 @@ export function Thread() {
     setSidebarOpen((prev) => !prev)
   }, [])
 
+  const handleNavigateQuiz = useCallback(() => {
+    navigate('/quiz')
+    if (!isDesktop) setSidebarOpen(false)
+  }, [isDesktop, navigate])
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <ThreadSidebarShell
@@ -77,6 +84,7 @@ export function Thread() {
         threads={threadHistory}
         isLoading={isThreadHistoryLoading}
         onOpenChange={setSidebarOpen}
+        onNavigateQuiz={handleNavigateQuiz}
         onSelectThread={handleSelectThread}
         onNewThread={handleNewThread}
       />
