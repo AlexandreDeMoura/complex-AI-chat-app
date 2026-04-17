@@ -1,15 +1,27 @@
-import { useState } from 'react'
+import { type ChangeEvent, useCallback } from 'react'
 import { ArrowLeft, CheckCircle2, Circle, FileQuestion, Upload } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { QUIZ_UPLOAD_MAX_SIZE_BYTES } from '@/features/quiz/data'
+import type { QuizMode, QuizQuestion, QuizUploadError } from '@/features/quiz/model'
+import { useQuizState } from '@/features/quiz/view-model'
 import { cn } from '@/lib/utils'
 
-type QuizScreen = 'upload' | 'question'
-type QuizMode = 'open' | 'mcq'
+const QUIZ_MAX_FILE_SIZE_MB = Math.round(QUIZ_UPLOAD_MAX_SIZE_BYTES / (1024 * 1024))
 
 export function QuizPage() {
-  const [screen, setScreen] = useState<QuizScreen>('upload')
-  const [mode, setMode] = useState<QuizMode>('open')
+  const {
+    screen,
+    mode,
+    isUploading,
+    uploadError,
+    questionCount,
+    currentQuestion,
+    currentQuestionIndex,
+    setMode,
+    uploadQuizFile,
+    returnToUpload,
+  } = useQuizState()
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
@@ -33,13 +45,20 @@ export function QuizPage() {
 
       <main className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 pb-6">
-          {screen === 'upload' ? (
-            <UploadShell onOpenQuestionShell={() => setScreen('question')} />
+          {screen === 'upload' || !currentQuestion ? (
+            <UploadShell
+              isUploading={isUploading}
+              uploadError={uploadError}
+              onUploadQuizFile={uploadQuizFile}
+            />
           ) : (
             <QuestionShell
+              question={currentQuestion}
+              questionNumber={currentQuestionIndex + 1}
+              questionCount={questionCount}
               mode={mode}
               onChangeMode={setMode}
-              onBackToUpload={() => setScreen('upload')}
+              onBackToUpload={returnToUpload}
             />
           )}
         </div>
@@ -49,16 +68,27 @@ export function QuizPage() {
 }
 
 interface UploadShellProps {
-  onOpenQuestionShell: () => void
+  isUploading: boolean
+  uploadError: QuizUploadError | null
+  onUploadQuizFile: (file: File | null) => Promise<void>
 }
 
-function UploadShell({ onOpenQuestionShell }: UploadShellProps) {
+function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShellProps) {
+  const handleFileInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.currentTarget
+      const file = input.files?.[0] ?? null
+      input.value = ''
+      await onUploadQuizFile(file)
+    },
+    [onUploadQuizFile],
+  )
+
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Upload a quiz JSON file</h1>
       <p className="text-muted-foreground mt-2 text-sm">
-        Route and navigation are now in place. File parsing and validation are implemented in
-        the next step.
+        The file must follow the quiz schema and stay under {QUIZ_MAX_FILE_SIZE_MB} MB.
       </p>
 
       <div className="mt-6 rounded-xl border border-dashed border-border bg-muted/25 p-6">
@@ -68,43 +98,68 @@ function UploadShell({ onOpenQuestionShell }: UploadShellProps) {
           </div>
           <p className="text-sm font-medium">Select a `.json` file</p>
           <p className="text-muted-foreground mt-1 text-xs">
-            Expected schema and validation errors land in the next commit.
+            On success, the quiz opens at question 1.
           </p>
           <input
             type="file"
-            accept=".json,application/json"
-            className="mt-4 w-full max-w-sm text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#2F6868] file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[#2F6868]/90"
+            accept=".json,application/json,text/json"
+            onChange={(event) => {
+              void handleFileInputChange(event)
+            }}
+            disabled={isUploading}
+            className="mt-4 w-full max-w-sm text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#2F6868] file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[#2F6868]/90 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
       </div>
 
-      <div className="mt-4 flex justify-end">
-        <Button variant="outline" onClick={onOpenQuestionShell}>
-          Open question shell
-        </Button>
-      </div>
+      {uploadError && <UploadErrorPanel error={uploadError} />}
     </section>
+  )
+}
+
+interface UploadErrorPanelProps {
+  error: QuizUploadError
+}
+
+function UploadErrorPanel({ error }: UploadErrorPanelProps) {
+  return (
+    <div
+      role="alert"
+      className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3"
+    >
+      <p className="text-sm font-semibold text-destructive">{error.title}</p>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-destructive">
+        {error.details.map((detail, index) => (
+          <li key={`${detail}-${index}`}>{detail}</li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
 interface QuestionShellProps {
   mode: QuizMode
+  question: QuizQuestion
+  questionNumber: number
+  questionCount: number
   onChangeMode: (mode: QuizMode) => void
   onBackToUpload: () => void
 }
 
-function QuestionShell({ mode, onChangeMode, onBackToUpload }: QuestionShellProps) {
-  const mcqOptions = [
-    'An event loop is a queue implementation.',
-    'An event loop coordinates async tasks on a single thread.',
-    'An event loop replaces promises with callbacks.',
-    'An event loop is only used in browsers.',
-  ]
+function QuestionShell({
+  mode,
+  question,
+  questionNumber,
+  questionCount,
+  onChangeMode,
+  onBackToUpload,
+}: QuestionShellProps) {
+  const prompt = mode === 'open' ? question.question : question.mcq_question
 
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-medium">Question 1 / 10</p>
+        <p className="text-sm font-medium">Question {questionNumber} / {questionCount}</p>
         <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
           <ModeButton isActive={mode === 'open'} onClick={() => onChangeMode('open')}>
             Open
@@ -115,9 +170,11 @@ function QuestionShell({ mode, onChangeMode, onBackToUpload }: QuestionShellProp
         </div>
       </div>
 
-      <h2 className="mt-5 text-xl font-semibold tracking-tight">
-        Explain how the JavaScript event loop interacts with microtasks and macrotasks.
-      </h2>
+      <p className="text-muted-foreground mt-2 text-xs uppercase tracking-wide">
+        Subject: {question.subject} · Difficulty: {question.difficulty}
+      </p>
+
+      <h2 className="mt-5 text-xl font-semibold tracking-tight">{prompt}</h2>
 
       {mode === 'open' ? (
         <div className="mt-4 space-y-3">
@@ -129,14 +186,14 @@ function QuestionShell({ mode, onChangeMode, onBackToUpload }: QuestionShellProp
         </div>
       ) : (
         <div className="mt-4 space-y-3">
-          {mcqOptions.map((option) => (
+          {question.mcq_options.map((option, index) => (
             <button
-              key={option}
+              key={`${option.option}-${index}`}
               type="button"
               className="flex w-full items-start gap-2 rounded-lg border border-input bg-background px-3 py-3 text-left text-sm hover:bg-accent hover:text-accent-foreground"
             >
               <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <span>{option}</span>
+              <span>{option.option}</span>
             </button>
           ))}
           <Button className="w-full sm:w-auto">
@@ -148,9 +205,15 @@ function QuestionShell({ mode, onChangeMode, onBackToUpload }: QuestionShellProp
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
         <div className="flex items-center gap-2">
-          <Button variant="outline">Previous</Button>
-          <Button variant="outline">Next</Button>
-          <Button variant="outline">Finish</Button>
+          <Button variant="outline" disabled>
+            Previous
+          </Button>
+          <Button variant="outline" disabled>
+            Next
+          </Button>
+          <Button variant="outline" disabled>
+            Finish
+          </Button>
         </div>
         <Button variant="ghost" onClick={onBackToUpload}>
           Return to upload
