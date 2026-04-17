@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { EffortSelector } from '@/components/thread/effort-selector'
 import { ModelSelector } from '@/components/thread/model-selector'
 import {
@@ -50,7 +48,7 @@ interface ThreadComposerShellProps {
 export function ThreadComposerShell({
   input,
   isLoading,
-  hideToolCalls,
+  hideToolCalls: _hideToolCalls,
   availableModels,
   selectedModel,
   selectedThinkingEffort,
@@ -60,7 +58,7 @@ export function ThreadComposerShell({
   onStop,
   onSelectModel,
   onSelectThinkingEffort,
-  onToggleHideToolCalls,
+  onToggleHideToolCalls: _onToggleHideToolCalls,
 }: ThreadComposerShellProps) {
   const selectedModelOption = availableModels.find((m) => m.id === selectedModel)
   const showThinkingEffort = selectedModelOption?.supportsThinking ?? false

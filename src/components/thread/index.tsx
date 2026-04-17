@@ -1,10 +1,9 @@
 import { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { ThreadComposerShell } from '@/components/thread/thread-composer-shell'
 import { ThreadHeader } from '@/components/thread/thread-header'
-import { ThreadMessageList } from '@/components/thread/thread-message-list'
 import { ThreadSidebarShell } from '@/components/thread/thread-sidebar-shell'
+import { ThreadSurface } from '@/components/thread/thread-surface'
 import { useChatViewModel } from '@/features/chat/view-model'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -104,65 +103,33 @@ export function Thread() {
           onNewThread={handleNewThread}
         />
 
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {!hasMessages ? (
-            <div className="flex-1 overflow-y-auto">
-              <div className="mt-[25vh] flex w-full flex-col items-center px-4">
-                <h1 className="text-4xl font-medium tracking-tight mb-10 text-[#373734] dark:text-[#C3C2B7]" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>System Designer</h1>
-                <ThreadComposerShell
-                  input={input}
-                  onInputChange={setInput}
-                  onSend={handleSend}
-                  onStop={stopGeneration}
-                  isLoading={isLoading}
-                  hideToolCalls={hideToolCalls}
-                  availableModels={availableModels}
-                  selectedModel={selectedModel}
-                  selectedThinkingEffort={selectedThinkingEffort}
-                  isModelSelectorDisabled={isModelLocked}
-                  onSelectModel={setSelectedModel}
-                  onSelectThinkingEffort={setSelectedThinkingEffort}
-                  onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
-                />
-              </div>
-            </div>
-          ) : (
-            <ThreadMessageList
-              messages={messages}
-              interrupt={interrupt}
-              isLoading={isLoading}
-              hideToolCalls={hideToolCalls}
-              onRegenerate={regenerateMessage}
-              onApproveInterrupt={() => {
-                void resumeInterrupt('approve')
-              }}
-              onRejectInterrupt={(reason) => {
-                void resumeInterrupt('reject', reason)
-              }}
-            />
-          )}
-
-          {hasMessages && (
-            <div className="px-4">
-              <ThreadComposerShell
-                input={input}
-                onInputChange={setInput}
-                onSend={handleSend}
-                onStop={stopGeneration}
-                isLoading={isLoading}
-                hideToolCalls={hideToolCalls}
-                availableModels={availableModels}
-                selectedModel={selectedModel}
-                selectedThinkingEffort={selectedThinkingEffort}
-                isModelSelectorDisabled={isModelLocked}
-                onSelectModel={setSelectedModel}
-                onSelectThinkingEffort={setSelectedThinkingEffort}
-                onToggleHideToolCalls={() => setHideToolCalls((p) => !p)}
-              />
-            </div>
-          )}
-        </main>
+        <ThreadSurface
+          input={input}
+          messages={messages}
+          interrupt={interrupt}
+          isLoading={isLoading}
+          hideToolCalls={hideToolCalls}
+          availableModels={availableModels}
+          selectedModel={selectedModel}
+          selectedThinkingEffort={selectedThinkingEffort}
+          isModelSelectorDisabled={isModelLocked}
+          onInputChange={setInput}
+          onSend={handleSend}
+          onStop={stopGeneration}
+          onToggleHideToolCalls={() => setHideToolCalls((previous) => !previous)}
+          onSelectModel={setSelectedModel}
+          onSelectThinkingEffort={setSelectedThinkingEffort}
+          onRegenerate={regenerateMessage}
+          onApproveInterrupt={() => {
+            void resumeInterrupt('approve')
+          }}
+          onRejectInterrupt={(reason) => {
+            void resumeInterrupt('reject', reason)
+          }}
+        />
       </motion.div>
     </div>
   )
 }
+
+export { ThreadSurface } from '@/components/thread/thread-surface'
