@@ -3,6 +3,7 @@ import 'dotenv/config'
 import express from 'express'
 import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
+import { QuizFeedbackError, generateQuizFeedback } from './application/quiz-service.js'
 import { listThreads } from './application/thread-service.js'
 import { getAvailableModels, THINKING_EFFORT_VALUES } from './infrastructure/agent.js'
 
@@ -21,6 +22,14 @@ const resumeSchema = z.object({
   action: z.enum(['approve', 'reject']),
   reason: z.string().optional(),
 })
+
+const quizFeedbackSchema = z
+  .object({
+    question: z.string().trim().min(1, 'question is required.'),
+    user_answer: z.string().trim().min(1, 'user_answer is required.'),
+    complete_answer: z.string().trim().min(1, 'complete_answer is required.'),
+  })
+  .strict()
 
 app.use(cors())
 app.use(express.json())
@@ -63,6 +72,42 @@ app.get('/api/models', (_req, res) => {
     const message =
       error instanceof Error ? error.message : 'Unknown server error.'
     res.status(400).json({ error: message })
+  }
+})
+
+const formatValidationIssues = (error) =>
+  error.issues.map((issue) => ({
+    path: issue.path.join('.'),
+    message: issue.message,
+  }))
+
+app.post('/api/quiz/feedback', async (req, res) => {
+  const payload = quizFeedbackSchema.safeParse(req.body)
+  if (!payload.success) {
+    res.status(400).json({
+      error: 'Invalid quiz feedback payload.',
+      issues: formatValidationIssues(payload.error),
+    })
+    return
+  }
+
+  try {
+    const feedback = await generateQuizFeedback({
+      question: payload.data.question,
+      userAnswer: payload.data.user_answer,
+      completeAnswer: payload.data.complete_answer,
+    })
+
+    res.json({ feedback })
+  } catch (error) {
+    if (error instanceof QuizFeedbackError) {
+      res.status(error.statusCode).json({ error: error.message })
+      return
+    }
+
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error.'
+    res.status(500).json({ error: message })
   }
 })
 
