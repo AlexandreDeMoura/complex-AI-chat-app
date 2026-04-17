@@ -128,12 +128,12 @@ function QuestionShell({ mode, onChangeMode, onBackToUpload }: QuestionShellProp
           <Button className="w-full sm:w-auto">Submit</Button>
         </div>
       ) : (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-3">
           {mcqOptions.map((option) => (
             <button
               key={option}
               type="button"
-              className="flex w-full items-start gap-2 rounded-lg border border-input bg-background px-3 py-3 text-left text-sm"
+              className="flex w-full items-start gap-2 rounded-lg border border-input bg-background px-3 py-3 text-left text-sm hover:bg-accent hover:text-accent-foreground"
             >
               <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <span>{option}</span>
