@@ -1,12 +1,17 @@
-import { useCallback, useMemo, useState } from 'react'
-import { parseQuizUploadFile } from '@/features/quiz/data'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { fetchFeedback, parseQuizUploadFile } from '@/features/quiz/data'
 import type {
+  QuizFeedbackState,
+  QuizFeedbackStatus,
   QuizMode,
   QuizQuestion,
   QuizQuestionState,
   QuizScreen,
   QuizUploadError,
 } from '@/features/quiz/model'
+
+const QUIZ_FEEDBACK_ERROR_MESSAGE =
+  'Feedback is unavailable for this answer. You can continue the quiz.'
 
 function createInitialQuestionState(): QuizQuestionState {
   return {
@@ -19,7 +24,18 @@ function createInitialQuestionState(): QuizQuestionState {
       selectedOptionIndex: null,
       submittedOptionIndex: null,
     },
+    feedback: {
+      status: 'idle',
+    },
   }
+}
+
+interface OpenFeedbackRequest {
+  questionIndex: number
+  quizSessionId: number
+  question: string
+  userAnswer: string
+  completeAnswer: string
 }
 
 export interface QuizViewModel {
@@ -32,6 +48,9 @@ export interface QuizViewModel {
   currentQuestion: QuizQuestion | null
   openDraftAnswer: string
   submittedOpenAnswer: string | null
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackError: string | null
   selectedMcqOptionIndex: number | null
   submittedMcqOptionIndex: number | null
   isOpenSubmitted: boolean
@@ -57,18 +76,25 @@ export function useQuizState(): QuizViewModel {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [uploadError, setUploadError] = useState<QuizUploadError | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const quizSessionIdRef = useRef(0)
+  const openSubmissionKeysRef = useRef<Set<string>>(new Set())
 
   const resetQuizSession = useCallback(() => {
+    quizSessionIdRef.current += 1
+    openSubmissionKeysRef.current.clear()
     setScreen('upload')
     setQuestions([])
     setQuestionStates([])
     setCurrentQuestionIndex(0)
   }, [])
 
-  const updateCurrentQuestionState = useCallback(
-    (update: (state: QuizQuestionState) => QuizQuestionState) => {
+  const updateQuestionStateAtIndex = useCallback(
+    (
+      questionIndex: number,
+      update: (state: QuizQuestionState) => QuizQuestionState,
+    ) => {
       setQuestionStates((previousQuestionStates) => {
-        const currentState = previousQuestionStates[currentQuestionIndex]
+        const currentState = previousQuestionStates[questionIndex]
 
         if (!currentState) {
           return previousQuestionStates
@@ -80,11 +106,18 @@ export function useQuizState(): QuizViewModel {
         }
 
         const nextQuestionStates = [...previousQuestionStates]
-        nextQuestionStates[currentQuestionIndex] = nextState
+        nextQuestionStates[questionIndex] = nextState
         return nextQuestionStates
       })
     },
-    [currentQuestionIndex],
+    [],
+  )
+
+  const updateCurrentQuestionState = useCallback(
+    (update: (state: QuizQuestionState) => QuizQuestionState) => {
+      updateQuestionStateAtIndex(currentQuestionIndex, update)
+    },
+    [currentQuestionIndex, updateQuestionStateAtIndex],
   )
 
   const uploadQuizFile = useCallback(async (file: File | null) => {
@@ -124,6 +157,67 @@ export function useQuizState(): QuizViewModel {
     }
   }, [resetQuizSession])
 
+  const requestOpenAnswerFeedback = useCallback(
+    async ({
+      questionIndex,
+      quizSessionId,
+      question,
+      userAnswer,
+      completeAnswer,
+    }: OpenFeedbackRequest) => {
+      try {
+        const feedback = await fetchFeedback({
+          question,
+          userAnswer,
+          completeAnswer,
+        })
+
+        if (quizSessionIdRef.current !== quizSessionId) {
+          return
+        }
+
+        updateQuestionStateAtIndex(questionIndex, (currentState) => {
+          if (
+            currentState.feedback.status !== 'loading'
+            || currentState.open.submittedAnswer !== userAnswer
+          ) {
+            return currentState
+          }
+
+          return {
+            ...currentState,
+            feedback: {
+              status: 'success',
+              feedback,
+            },
+          }
+        })
+      } catch {
+        if (quizSessionIdRef.current !== quizSessionId) {
+          return
+        }
+
+        updateQuestionStateAtIndex(questionIndex, (currentState) => {
+          if (
+            currentState.feedback.status !== 'loading'
+            || currentState.open.submittedAnswer !== userAnswer
+          ) {
+            return currentState
+          }
+
+          return {
+            ...currentState,
+            feedback: {
+              status: 'error',
+              message: QUIZ_FEEDBACK_ERROR_MESSAGE,
+            },
+          }
+        })
+      }
+    },
+    [updateQuestionStateAtIndex],
+  )
+
   const setMode = useCallback((mode: QuizMode) => {
     updateCurrentQuestionState((currentState) => {
       if (currentState.mode === mode) {
@@ -154,25 +248,62 @@ export function useQuizState(): QuizViewModel {
   }, [updateCurrentQuestionState])
 
   const submitOpenAnswer = useCallback(() => {
-    updateCurrentQuestionState((currentState) => {
-      if (currentState.open.submittedAnswer !== null) {
-        return currentState
-      }
+    const question = questions[currentQuestionIndex]
+    const currentQuestionState = questionStates[currentQuestionIndex]
 
-      const draftAnswer = currentState.open.draftAnswer.trim()
-      if (!draftAnswer) {
-        return currentState
+    if (!question || !currentQuestionState) {
+      return
+    }
+
+    if (currentQuestionState.open.submittedAnswer !== null) {
+      return
+    }
+
+    const submittedAnswer = currentQuestionState.open.draftAnswer.trim()
+    if (!submittedAnswer) {
+      return
+    }
+
+    const quizSessionId = quizSessionIdRef.current
+    const submissionKey = `${quizSessionId}:${currentQuestionIndex}`
+
+    if (openSubmissionKeysRef.current.has(submissionKey)) {
+      return
+    }
+
+    openSubmissionKeysRef.current.add(submissionKey)
+
+    updateQuestionStateAtIndex(currentQuestionIndex, (state) => {
+      if (state.open.submittedAnswer !== null) {
+        return state
       }
 
       return {
-        ...currentState,
+        ...state,
         open: {
-          draftAnswer,
-          submittedAnswer: draftAnswer,
+          draftAnswer: submittedAnswer,
+          submittedAnswer,
+        },
+        feedback: {
+          status: 'loading',
         },
       }
     })
-  }, [updateCurrentQuestionState])
+
+    void requestOpenAnswerFeedback({
+      questionIndex: currentQuestionIndex,
+      quizSessionId,
+      question: question.question,
+      userAnswer: submittedAnswer,
+      completeAnswer: question.complete_answer,
+    })
+  }, [
+    currentQuestionIndex,
+    questionStates,
+    questions,
+    requestOpenAnswerFeedback,
+    updateQuestionStateAtIndex,
+  ])
 
   const selectMcqOption = useCallback(
     (optionIndex: number) => {
@@ -261,6 +392,10 @@ export function useQuizState(): QuizViewModel {
   const mode = currentQuestionState?.mode ?? 'open'
   const openDraftAnswer = currentQuestionState?.open.draftAnswer ?? ''
   const submittedOpenAnswer = currentQuestionState?.open.submittedAnswer ?? null
+  const feedbackState: QuizFeedbackState = currentQuestionState?.feedback ?? { status: 'idle' }
+  const feedbackStatus = feedbackState.status
+  const feedbackText = feedbackState.status === 'success' ? feedbackState.feedback : null
+  const feedbackError = feedbackState.status === 'error' ? feedbackState.message : null
   const selectedMcqOptionIndex = currentQuestionState?.mcq.selectedOptionIndex ?? null
   const submittedMcqOptionIndex = currentQuestionState?.mcq.submittedOptionIndex ?? null
   const isOpenSubmitted = submittedOpenAnswer !== null
@@ -278,6 +413,9 @@ export function useQuizState(): QuizViewModel {
     currentQuestion,
     openDraftAnswer,
     submittedOpenAnswer,
+    feedbackStatus,
+    feedbackText,
+    feedbackError,
     selectedMcqOptionIndex,
     submittedMcqOptionIndex,
     isOpenSubmitted,

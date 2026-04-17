@@ -1,5 +1,6 @@
 export type QuizScreen = 'upload' | 'question'
 export type QuizMode = 'open' | 'mcq'
+export type QuizFeedbackStatus = 'idle' | 'loading' | 'success' | 'error'
 
 export interface QuizUploadError {
   title: string
@@ -16,8 +17,15 @@ export interface McqModeAnswerState {
   submittedOptionIndex: number | null
 }
 
+export type QuizFeedbackState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; feedback: string }
+  | { status: 'error'; message: string }
+
 export interface QuizQuestionState {
   mode: QuizMode
   open: OpenModeAnswerState
   mcq: McqModeAnswerState
+  feedback: QuizFeedbackState
 }

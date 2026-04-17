@@ -1,6 +1,8 @@
 export { quizSchema, quizQuestionSchema } from '@/features/quiz/model/schema'
 export type { QuizOption, QuizQuestion } from '@/features/quiz/model/schema'
 export type {
+  QuizFeedbackState,
+  QuizFeedbackStatus,
   McqModeAnswerState,
   OpenModeAnswerState,
   QuizMode,
