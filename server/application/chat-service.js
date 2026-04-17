@@ -99,13 +99,27 @@ export const sendMessage = async ({ message, threadId, model, thinkingEffort }) 
   return { reply }
 }
 
-export const streamMessage = async ({ message, threadId, model, thinkingEffort, res, signal }) => {
+export const streamMessage = async ({
+  message,
+  threadId,
+  model,
+  thinkingEffort,
+  systemContext,
+  res,
+  signal,
+}) => {
   const effectiveModel = resolveThreadModel(threadId, model)
   const agent = getAgent(effectiveModel, thinkingEffort)
+  const isFirstMessageInThread = !threadStore.get(threadId)
   threadStore.upsert(threadId, message, effectiveModel)
 
+  const messages = [{ role: 'user', content: message }]
+  if (isFirstMessageInThread && systemContext) {
+    messages.unshift({ role: 'system', content: systemContext })
+  }
+
   const stream = await agent.stream(
-    { messages: [{ role: 'user', content: message }] },
+    { messages },
     {
       ...getThreadConfig(threadId),
       streamMode: 'messages',

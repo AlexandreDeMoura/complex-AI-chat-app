@@ -10,11 +10,15 @@ import { getAvailableModels, THINKING_EFFORT_VALUES } from './infrastructure/age
 const app = express()
 const port = Number(process.env.PORT ?? 8788)
 
-const requestSchema = z.object({
+const chatRequestSchema = z.object({
   message: z.string().trim().min(1, 'Message is required.'),
   threadId: z.string().trim().min(1, 'threadId is required.'),
   model: z.string().optional(),
   thinkingEffort: z.enum(THINKING_EFFORT_VALUES).catch('off').optional(),
+})
+
+const streamRequestSchema = chatRequestSchema.extend({
+  systemContext: z.string().trim().min(1, 'systemContext cannot be empty.').optional(),
 })
 
 const resumeSchema = z.object({
@@ -118,7 +122,7 @@ app.post('/api/chat', async (req, res) => {
       threadId,
       model: requestedModel,
       thinkingEffort,
-    } = requestSchema.parse(req.body)
+    } = chatRequestSchema.parse(req.body)
     const model = resolveRequestModel(requestedModel)
     const response = await sendMessage({ message, threadId, model, thinkingEffort })
     res.json(response)
@@ -141,7 +145,8 @@ app.post('/api/chat/stream', async (req, res) => {
       threadId,
       model: requestedModel,
       thinkingEffort,
-    } = requestSchema.parse(req.body)
+      systemContext,
+    } = streamRequestSchema.parse(req.body)
     const model = resolveRequestModel(requestedModel)
 
     res.setHeader('Content-Type', 'text/event-stream')
@@ -155,6 +160,7 @@ app.post('/api/chat/stream', async (req, res) => {
       threadId,
       model,
       thinkingEffort,
+      systemContext,
       res,
       signal: abortController.signal,
     })

@@ -9,6 +9,7 @@ interface ChatStreamRequest {
   threadId: string
   model?: string
   thinkingEffort?: ThinkingEffort
+  systemContext?: string
   signal: AbortSignal
 }
 
@@ -54,12 +55,13 @@ export function openChatStream({
   threadId,
   model,
   thinkingEffort,
+  systemContext,
   signal,
 }: ChatStreamRequest): Promise<Response> {
   return fetch('/api/chat/stream', {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ message, threadId, model, thinkingEffort }),
+    body: JSON.stringify({ message, threadId, model, thinkingEffort, systemContext }),
     signal,
   })
 }
