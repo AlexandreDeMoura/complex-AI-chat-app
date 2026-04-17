@@ -4,15 +4,23 @@ import {
   CheckCircle2,
   Circle,
   FileQuestion,
+  Loader2,
   Upload,
   XCircle,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { QUIZ_UPLOAD_MAX_SIZE_BYTES } from '@/features/quiz/data'
-import type { QuizMode, QuizQuestion, QuizUploadError } from '@/features/quiz/model'
+import type {
+  QuizFeedbackStatus,
+  QuizMode,
+  QuizQuestion,
+  QuizUploadError,
+} from '@/features/quiz/model'
 import { useQuizState } from '@/features/quiz/view-model'
 import { cn } from '@/lib/utils'
+import { MarkdownText } from '@/components/thread/markdown-text'
 
 const QUIZ_MAX_FILE_SIZE_MB = Math.round(QUIZ_UPLOAD_MAX_SIZE_BYTES / (1024 * 1024))
 
@@ -27,6 +35,9 @@ export function QuizPage() {
     currentQuestionIndex,
     openDraftAnswer,
     submittedOpenAnswer,
+    feedbackStatus,
+    feedbackText,
+    feedbackError,
     selectedMcqOptionIndex,
     submittedMcqOptionIndex,
     isOpenSubmitted,
@@ -81,6 +92,9 @@ export function QuizPage() {
               mode={mode}
               openDraftAnswer={openDraftAnswer}
               submittedOpenAnswer={submittedOpenAnswer}
+              feedbackStatus={feedbackStatus}
+              feedbackText={feedbackText}
+              feedbackError={feedbackError}
               selectedMcqOptionIndex={selectedMcqOptionIndex}
               submittedMcqOptionIndex={submittedMcqOptionIndex}
               isOpenSubmitted={isOpenSubmitted}
@@ -181,6 +195,9 @@ interface QuestionShellProps {
   questionCount: number
   openDraftAnswer: string
   submittedOpenAnswer: string | null
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackError: string | null
   selectedMcqOptionIndex: number | null
   submittedMcqOptionIndex: number | null
   isOpenSubmitted: boolean
@@ -205,6 +222,9 @@ function QuestionShell({
   questionCount,
   openDraftAnswer,
   submittedOpenAnswer,
+  feedbackStatus,
+  feedbackText,
+  feedbackError,
   selectedMcqOptionIndex,
   submittedMcqOptionIndex,
   isOpenSubmitted,
@@ -276,11 +296,19 @@ function QuestionShell({
                 <p className="mt-1 whitespace-pre-wrap text-sm">{submittedOpenAnswer}</p>
               </div>
 
+              <OpenAnswerFeedbackSection
+                feedbackStatus={feedbackStatus}
+                feedbackText={feedbackText}
+                feedbackError={feedbackError}
+              />
+
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Complete answer
                 </p>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{question.complete_answer}</p>
+                <MarkdownText density="compact" className="mt-1 text-sm">
+                  {question.complete_answer}
+                </MarkdownText>
               </div>
             </div>
           )}
@@ -369,6 +397,70 @@ function QuestionShell({
         </Button>
       </div>
     </section>
+  )
+}
+
+interface OpenAnswerFeedbackSectionProps {
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackError: string | null
+}
+
+function OpenAnswerFeedbackSection({
+  feedbackStatus,
+  feedbackText,
+  feedbackError,
+}: OpenAnswerFeedbackSectionProps) {
+  if (feedbackStatus === 'idle') {
+    return null
+  }
+
+  if (feedbackStatus === 'loading') {
+    return (
+      <div
+        className="rounded-lg border border-border bg-background/70 p-3"
+        aria-live="polite"
+      >
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          AI feedback
+        </p>
+        <div className="mt-2 space-y-2">
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Generating feedback...
+          </p>
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+        </div>
+      </div>
+    )
+  }
+
+  if (feedbackStatus === 'error') {
+    return (
+      <div
+        className="rounded-lg border border-destructive/40 bg-destructive/10 p-3"
+        role="status"
+      >
+        <p className="text-xs font-medium uppercase tracking-wide text-destructive">
+          AI feedback
+        </p>
+        <p className="mt-1 whitespace-pre-wrap text-sm text-destructive">
+          {feedbackError ?? 'Feedback is unavailable for this answer. You can continue the quiz.'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-background/70 p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        AI feedback
+      </p>
+      <MarkdownText density="compact" className="mt-1 text-sm">
+        {feedbackText || 'No feedback available.'}
+      </MarkdownText>
+    </div>
   )
 }
 
