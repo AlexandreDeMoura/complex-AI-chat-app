@@ -13,6 +13,14 @@ import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
 
+type MarkdownTextDensity = "chat" | "compact";
+
+interface MarkdownTextProps {
+  children: string;
+  density?: MarkdownTextDensity;
+  className?: string;
+}
+
 interface CodeHeaderProps {
   language?: string;
   code: string;
@@ -222,9 +230,29 @@ const defaultComponents: any = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+const markdownDensityClasses: Record<MarkdownTextDensity, string> = {
+  chat: "",
+  compact: cn(
+    "[&_h1]:mb-4 [&_h1]:text-2xl",
+    "[&_h2]:mt-4 [&_h2]:mb-3 [&_h2]:text-xl",
+    "[&_h3]:mt-4 [&_h3]:mb-3 [&_h3]:text-lg",
+    "[&_h4]:mt-3 [&_h4]:mb-3 [&_h4]:text-base",
+    "[&_h5]:my-3 [&_h5]:text-base",
+    "[&_h6]:my-3",
+    "[&_p]:my-3 [&_p]:leading-6",
+    "[&_ul]:my-3 [&_ol]:my-3 [&_ul]:ml-5 [&_ol]:ml-5",
+    "[&_ul>li]:mt-2 [&_ol>li]:mt-2",
+    "[&_hr]:my-4 [&_blockquote]:my-3 [&_table]:my-4",
+  ),
+};
+
+const MarkdownTextImpl: FC<MarkdownTextProps> = ({
+  children,
+  density = "chat",
+  className,
+}) => {
   return (
-    <div className="markdown-content">
+    <div className={cn("markdown-content", markdownDensityClasses[density], className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
