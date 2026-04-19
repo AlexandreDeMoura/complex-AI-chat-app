@@ -33,8 +33,11 @@ export function QuizPage() {
     isUploading,
     uploadError,
     questionCount,
+    totalQuestionCount,
     currentQuestion,
     currentQuestionIndex,
+    availableSubjects,
+    selectedSubject,
     openDraftAnswer,
     submittedOpenAnswer,
     feedbackStatus,
@@ -56,6 +59,7 @@ export function QuizPage() {
     submitMcqAnswer,
     goToPreviousQuestion,
     goToNextQuestion,
+    setSubjectFilter,
     uploadQuizFile,
     finishQuiz,
     returnToUpload,
@@ -96,6 +100,9 @@ export function QuizPage() {
               question={currentQuestion}
               questionNumber={currentQuestionIndex + 1}
               questionCount={questionCount}
+              totalQuestionCount={totalQuestionCount}
+              availableSubjects={availableSubjects}
+              selectedSubject={selectedSubject}
               mode={mode}
               openDraftAnswer={openDraftAnswer}
               submittedOpenAnswer={submittedOpenAnswer}
@@ -118,6 +125,7 @@ export function QuizPage() {
               onFinishQuiz={finishQuiz}
               onBackToUpload={returnToUpload}
               onAskGuidance={openQuizChatHandoff}
+              onSubjectFilterChange={setSubjectFilter}
             />
           )}
         </div>
@@ -208,6 +216,9 @@ interface QuestionShellProps {
   question: QuizQuestion
   questionNumber: number
   questionCount: number
+  totalQuestionCount: number
+  availableSubjects: string[]
+  selectedSubject: string | null
   openDraftAnswer: string
   submittedOpenAnswer: string | null
   feedbackStatus: QuizFeedbackStatus
@@ -229,6 +240,7 @@ interface QuestionShellProps {
   onFinishQuiz: () => void
   onBackToUpload: () => void
   onAskGuidance: () => void
+  onSubjectFilterChange: (subject: string | null) => void
 }
 
 function QuestionShell({
@@ -236,6 +248,9 @@ function QuestionShell({
   question,
   questionNumber,
   questionCount,
+  totalQuestionCount,
+  availableSubjects,
+  selectedSubject,
   openDraftAnswer,
   submittedOpenAnswer,
   feedbackStatus,
@@ -257,6 +272,7 @@ function QuestionShell({
   onFinishQuiz,
   onBackToUpload,
   onAskGuidance,
+  onSubjectFilterChange,
 }: QuestionShellProps) {
   const prompt = mode === 'open' ? question.question : question.mcq_question
   const canSubmitOpen = openDraftAnswer.trim().length > 0 && !isOpenSubmitted
@@ -289,6 +305,39 @@ function QuestionShell({
           </Button>
         </div>
       </div>
+
+      {availableSubjects.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Subject:</span>
+          <button
+            type="button"
+            onClick={() => onSubjectFilterChange(null)}
+            className={cn(
+              'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              selectedSubject === null
+                ? 'bg-[#2F6868] text-white'
+                : 'bg-muted text-muted-foreground hover:text-foreground',
+            )}
+          >
+            All ({totalQuestionCount})
+          </button>
+          {availableSubjects.map((subject) => (
+            <button
+              key={subject}
+              type="button"
+              onClick={() => onSubjectFilterChange(subject)}
+              className={cn(
+                'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                selectedSubject === subject
+                  ? 'bg-[#2F6868] text-white'
+                  : 'bg-muted text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {subject}
+            </button>
+          ))}
+        </div>
+      )}
 
       <p className="text-muted-foreground mt-2 text-xs uppercase tracking-wide">
         Subject: {question.subject} · Difficulty: {question.difficulty}

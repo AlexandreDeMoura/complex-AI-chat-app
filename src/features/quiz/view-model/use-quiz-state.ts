@@ -45,7 +45,10 @@ export interface QuizViewModel {
   isUploading: boolean
   uploadError: QuizUploadError | null
   questionCount: number
+  totalQuestionCount: number
   currentQuestionIndex: number
+  availableSubjects: string[]
+  selectedSubject: string | null
   currentQuestion: QuizQuestion | null
   openDraftAnswer: string
   submittedOpenAnswer: string | null
@@ -69,6 +72,7 @@ export interface QuizViewModel {
   goToPreviousQuestion: () => void
   goToNextQuestion: () => void
   uploadQuizFile: (file: File | null) => Promise<void>
+  setSubjectFilter: (subject: string | null) => void
   finishQuiz: () => void
   returnToUpload: () => void
   openQuizChatHandoff: () => void
@@ -87,10 +91,27 @@ export function useQuizState(): QuizViewModel {
   const [quizChatSystemContext, setQuizChatSystemContext] = useState<string | null>(null)
   const quizSessionIdRef = useRef(0)
   const openSubmissionKeysRef = useRef<Set<string>>(new Set())
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(null)
+
+  const availableSubjects = useMemo(() => {
+    const subjects = new Set(questions.map((q) => q.subject))
+    return Array.from(subjects).sort()
+  }, [questions])
+
+  const filteredIndices = useMemo(() => {
+    if (!selectedSubject) return questions.map((_, i) => i)
+    return questions.reduce<number[]>((acc, q, i) => {
+      if (q.subject === selectedSubject) acc.push(i)
+      return acc
+    }, [])
+  }, [questions, selectedSubject])
+
+  const actualQuestionIndex = filteredIndices[currentQuestionIndex] ?? 0
 
   const resetQuizSession = useCallback(() => {
     quizSessionIdRef.current += 1
     openSubmissionKeysRef.current.clear()
+    setSelectedSubject(null)
     setIsQuizChatOpen(false)
     setQuizChatThreadId(null)
     setQuizChatSystemContext(null)
@@ -127,9 +148,9 @@ export function useQuizState(): QuizViewModel {
 
   const updateCurrentQuestionState = useCallback(
     (update: (state: QuizQuestionState) => QuizQuestionState) => {
-      updateQuestionStateAtIndex(currentQuestionIndex, update)
+      updateQuestionStateAtIndex(actualQuestionIndex, update)
     },
-    [currentQuestionIndex, updateQuestionStateAtIndex],
+    [actualQuestionIndex, updateQuestionStateAtIndex],
   )
 
   const uploadQuizFile = useCallback(async (file: File | null) => {
@@ -260,8 +281,8 @@ export function useQuizState(): QuizViewModel {
   }, [updateCurrentQuestionState])
 
   const submitOpenAnswer = useCallback(() => {
-    const question = questions[currentQuestionIndex]
-    const currentQuestionState = questionStates[currentQuestionIndex]
+    const question = questions[actualQuestionIndex]
+    const currentQuestionState = questionStates[actualQuestionIndex]
 
     if (!question || !currentQuestionState) {
       return
@@ -277,7 +298,7 @@ export function useQuizState(): QuizViewModel {
     }
 
     const quizSessionId = quizSessionIdRef.current
-    const submissionKey = `${quizSessionId}:${currentQuestionIndex}`
+    const submissionKey = `${quizSessionId}:${actualQuestionIndex}`
 
     if (openSubmissionKeysRef.current.has(submissionKey)) {
       return
@@ -285,7 +306,7 @@ export function useQuizState(): QuizViewModel {
 
     openSubmissionKeysRef.current.add(submissionKey)
 
-    updateQuestionStateAtIndex(currentQuestionIndex, (state) => {
+    updateQuestionStateAtIndex(actualQuestionIndex, (state) => {
       if (state.open.submittedAnswer !== null) {
         return state
       }
@@ -303,14 +324,14 @@ export function useQuizState(): QuizViewModel {
     })
 
     void requestOpenAnswerFeedback({
-      questionIndex: currentQuestionIndex,
+      questionIndex: actualQuestionIndex,
       quizSessionId,
       question: question.question,
       userAnswer: submittedAnswer,
       completeAnswer: question.complete_answer,
     })
   }, [
-    currentQuestionIndex,
+    actualQuestionIndex,
     questionStates,
     questions,
     requestOpenAnswerFeedback,
@@ -319,7 +340,7 @@ export function useQuizState(): QuizViewModel {
 
   const selectMcqOption = useCallback(
     (optionIndex: number) => {
-      const currentQuestion = questions[currentQuestionIndex]
+      const currentQuestion = questions[actualQuestionIndex]
       if (!Number.isInteger(optionIndex) || !currentQuestion) {
         return
       }
@@ -345,7 +366,7 @@ export function useQuizState(): QuizViewModel {
         }
       })
     },
-    [currentQuestionIndex, questions, updateCurrentQuestionState],
+    [actualQuestionIndex, questions, updateCurrentQuestionState],
   )
 
   const submitMcqAnswer = useCallback(() => {
@@ -374,13 +395,13 @@ export function useQuizState(): QuizViewModel {
 
   const goToNextQuestion = useCallback(() => {
     setCurrentQuestionIndex((previousQuestionIndex) => {
-      if (questions.length === 0) {
+      if (filteredIndices.length === 0) {
         return previousQuestionIndex
       }
 
-      return Math.min(previousQuestionIndex + 1, questions.length - 1)
+      return Math.min(previousQuestionIndex + 1, filteredIndices.length - 1)
     })
-  }, [questions.length])
+  }, [filteredIndices.length])
 
   const finishQuiz = useCallback(() => {
     setUploadError(null)
@@ -391,9 +412,14 @@ export function useQuizState(): QuizViewModel {
     finishQuiz()
   }, [finishQuiz])
 
+  const setSubjectFilter = useCallback((subject: string | null) => {
+    setSelectedSubject(subject)
+    setCurrentQuestionIndex(0)
+  }, [])
+
   const openQuizChatHandoff = useCallback(() => {
-    const currentQuestion = questions[currentQuestionIndex]
-    const currentQuestionState = questionStates[currentQuestionIndex]
+    const currentQuestion = questions[actualQuestionIndex]
+    const currentQuestionState = questionStates[actualQuestionIndex]
 
     if (!currentQuestion || !currentQuestionState) {
       return
@@ -408,7 +434,7 @@ export function useQuizState(): QuizViewModel {
     setQuizChatThreadId(threadId)
     setQuizChatSystemContext(prelude)
     setIsQuizChatOpen(true)
-  }, [currentQuestionIndex, questionStates, questions])
+  }, [actualQuestionIndex, questionStates, questions])
 
   const closeQuizChatHandoff = useCallback(() => {
     setIsQuizChatOpen(false)
@@ -417,13 +443,13 @@ export function useQuizState(): QuizViewModel {
   }, [])
 
   const currentQuestion = useMemo(
-    () => questions[currentQuestionIndex] ?? null,
-    [questions, currentQuestionIndex],
+    () => questions[actualQuestionIndex] ?? null,
+    [questions, actualQuestionIndex],
   )
 
   const currentQuestionState = useMemo(
-    () => questionStates[currentQuestionIndex] ?? null,
-    [questionStates, currentQuestionIndex],
+    () => questionStates[actualQuestionIndex] ?? null,
+    [questionStates, actualQuestionIndex],
   )
 
   const mode = currentQuestionState?.mode ?? 'open'
@@ -438,15 +464,18 @@ export function useQuizState(): QuizViewModel {
   const isOpenSubmitted = submittedOpenAnswer !== null
   const isMcqSubmitted = submittedMcqOptionIndex !== null
   const isFirstQuestion = currentQuestionIndex <= 0
-  const isLastQuestion = questions.length > 0 && currentQuestionIndex >= questions.length - 1
+  const isLastQuestion = filteredIndices.length > 0 && currentQuestionIndex >= filteredIndices.length - 1
 
   return {
     screen,
     mode,
     isUploading,
     uploadError,
-    questionCount: questions.length,
+    questionCount: filteredIndices.length,
+    totalQuestionCount: questions.length,
     currentQuestionIndex,
+    availableSubjects,
+    selectedSubject,
     currentQuestion,
     openDraftAnswer,
     submittedOpenAnswer,
@@ -470,6 +499,7 @@ export function useQuizState(): QuizViewModel {
     goToPreviousQuestion,
     goToNextQuestion,
     uploadQuizFile,
+    setSubjectFilter,
     finishQuiz,
     returnToUpload,
     openQuizChatHandoff,
