@@ -9,6 +9,7 @@ import type {
   QuizScreen,
   QuizUploadError,
 } from '@/features/quiz/model'
+import { buildQuizPrelude } from '@/features/quiz/model'
 
 const QUIZ_FEEDBACK_ERROR_MESSAGE =
   'Feedback is unavailable for this answer. You can continue the quiz.'
@@ -57,6 +58,9 @@ export interface QuizViewModel {
   isMcqSubmitted: boolean
   isFirstQuestion: boolean
   isLastQuestion: boolean
+  isQuizChatOpen: boolean
+  quizChatThreadId: string | null
+  quizChatSystemContext: string | null
   setMode: (mode: QuizMode) => void
   setOpenDraftAnswer: (answer: string) => void
   submitOpenAnswer: () => void
@@ -67,6 +71,8 @@ export interface QuizViewModel {
   uploadQuizFile: (file: File | null) => Promise<void>
   finishQuiz: () => void
   returnToUpload: () => void
+  openQuizChatHandoff: () => void
+  closeQuizChatHandoff: () => void
 }
 
 export function useQuizState(): QuizViewModel {
@@ -76,12 +82,18 @@ export function useQuizState(): QuizViewModel {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [uploadError, setUploadError] = useState<QuizUploadError | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isQuizChatOpen, setIsQuizChatOpen] = useState(false)
+  const [quizChatThreadId, setQuizChatThreadId] = useState<string | null>(null)
+  const [quizChatSystemContext, setQuizChatSystemContext] = useState<string | null>(null)
   const quizSessionIdRef = useRef(0)
   const openSubmissionKeysRef = useRef<Set<string>>(new Set())
 
   const resetQuizSession = useCallback(() => {
     quizSessionIdRef.current += 1
     openSubmissionKeysRef.current.clear()
+    setIsQuizChatOpen(false)
+    setQuizChatThreadId(null)
+    setQuizChatSystemContext(null)
     setScreen('upload')
     setQuestions([])
     setQuestionStates([])
@@ -379,6 +391,31 @@ export function useQuizState(): QuizViewModel {
     finishQuiz()
   }, [finishQuiz])
 
+  const openQuizChatHandoff = useCallback(() => {
+    const currentQuestion = questions[currentQuestionIndex]
+    const currentQuestionState = questionStates[currentQuestionIndex]
+
+    if (!currentQuestion || !currentQuestionState) {
+      return
+    }
+
+    const threadId = crypto.randomUUID()
+    const prelude = buildQuizPrelude({
+      question: currentQuestion,
+      questionState: currentQuestionState,
+    })
+
+    setQuizChatThreadId(threadId)
+    setQuizChatSystemContext(prelude)
+    setIsQuizChatOpen(true)
+  }, [currentQuestionIndex, questionStates, questions])
+
+  const closeQuizChatHandoff = useCallback(() => {
+    setIsQuizChatOpen(false)
+    setQuizChatThreadId(null)
+    setQuizChatSystemContext(null)
+  }, [])
+
   const currentQuestion = useMemo(
     () => questions[currentQuestionIndex] ?? null,
     [questions, currentQuestionIndex],
@@ -422,6 +459,9 @@ export function useQuizState(): QuizViewModel {
     isMcqSubmitted,
     isFirstQuestion,
     isLastQuestion,
+    isQuizChatOpen,
+    quizChatThreadId,
+    quizChatSystemContext,
     setMode,
     setOpenDraftAnswer,
     submitOpenAnswer,
@@ -432,5 +472,7 @@ export function useQuizState(): QuizViewModel {
     uploadQuizFile,
     finishQuiz,
     returnToUpload,
+    openQuizChatHandoff,
+    closeQuizChatHandoff,
   }
 }

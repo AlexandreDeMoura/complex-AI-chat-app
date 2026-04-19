@@ -5,6 +5,7 @@ import {
   Circle,
   FileQuestion,
   Loader2,
+  MessageCircle,
   Upload,
   XCircle,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ import type {
 import { useQuizState } from '@/features/quiz/view-model'
 import { cn } from '@/lib/utils'
 import { MarkdownText } from '@/components/thread/markdown-text'
+import { QuizChatModal } from '@/features/quiz/view/quiz-chat-modal'
 
 const QUIZ_MAX_FILE_SIZE_MB = Math.round(QUIZ_UPLOAD_MAX_SIZE_BYTES / (1024 * 1024))
 
@@ -44,6 +46,9 @@ export function QuizPage() {
     isMcqSubmitted,
     isFirstQuestion,
     isLastQuestion,
+    isQuizChatOpen,
+    quizChatThreadId,
+    quizChatSystemContext,
     setMode,
     setOpenDraftAnswer,
     submitOpenAnswer,
@@ -54,6 +59,8 @@ export function QuizPage() {
     uploadQuizFile,
     finishQuiz,
     returnToUpload,
+    openQuizChatHandoff,
+    closeQuizChatHandoff,
   } = useQuizState()
 
   return (
@@ -110,10 +117,18 @@ export function QuizPage() {
               onNextQuestion={goToNextQuestion}
               onFinishQuiz={finishQuiz}
               onBackToUpload={returnToUpload}
+              onAskGuidance={openQuizChatHandoff}
             />
           )}
         </div>
       </main>
+
+      <QuizChatModal
+        open={isQuizChatOpen}
+        threadId={quizChatThreadId}
+        systemContext={quizChatSystemContext}
+        onClose={closeQuizChatHandoff}
+      />
     </div>
   )
 }
@@ -213,6 +228,7 @@ interface QuestionShellProps {
   onNextQuestion: () => void
   onFinishQuiz: () => void
   onBackToUpload: () => void
+  onAskGuidance: () => void
 }
 
 function QuestionShell({
@@ -240,6 +256,7 @@ function QuestionShell({
   onNextQuestion,
   onFinishQuiz,
   onBackToUpload,
+  onAskGuidance,
 }: QuestionShellProps) {
   const prompt = mode === 'open' ? question.question : question.mcq_question
   const canSubmitOpen = openDraftAnswer.trim().length > 0 && !isOpenSubmitted
@@ -252,13 +269,24 @@ function QuestionShell({
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium">Question {questionNumber} / {questionCount}</p>
-        <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
-          <ModeButton isActive={mode === 'open'} onClick={() => onChangeMode('open')}>
-            Ouverte
-          </ModeButton>
-          <ModeButton isActive={mode === 'mcq'} onClick={() => onChangeMode('mcq')}>
-            QCM
-          </ModeButton>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
+            <ModeButton isActive={mode === 'open'} onClick={() => onChangeMode('open')}>
+              Ouverte
+            </ModeButton>
+            <ModeButton isActive={mode === 'mcq'} onClick={() => onChangeMode('mcq')}>
+              QCM
+            </ModeButton>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAskGuidance}
+            className="gap-2"
+          >
+            <MessageCircle className="size-4" />
+            Ask guidance to AI
+          </Button>
         </div>
       </div>
 

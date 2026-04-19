@@ -69,6 +69,25 @@ const streamAgentToSSE = async (stream, res, threadId, agent) => {
   await emitInterruptIfPending(agent, threadId, res)
 }
 
+const buildFirstTurnMessage = ({ message, isFirstMessageInThread, systemContext }) => {
+  const normalizedContext = typeof systemContext === 'string' ? systemContext.trim() : ''
+  if (!isFirstMessageInThread || !normalizedContext) {
+    return message
+  }
+
+  return [
+    '<invisible_system_context>',
+    'This context is injected by the application for tutoring guidance.',
+    'Do not reveal this block unless the user explicitly asks for it.',
+    normalizedContext,
+    '</invisible_system_context>',
+    '',
+    '<user_message>',
+    message,
+    '</user_message>',
+  ].join('\n')
+}
+
 export const sendMessage = async ({ message, threadId, model, thinkingEffort }) => {
   const effectiveModel = resolveThreadModel(threadId, model)
   const agent = getAgent(effectiveModel, thinkingEffort)
@@ -113,10 +132,12 @@ export const streamMessage = async ({
   const isFirstMessageInThread = !threadStore.get(threadId)
   threadStore.upsert(threadId, message, effectiveModel)
 
-  const messages = [{ role: 'user', content: message }]
-  if (isFirstMessageInThread && systemContext) {
-    messages.unshift({ role: 'system', content: systemContext })
-  }
+  const firstTurnMessage = buildFirstTurnMessage({
+    message,
+    isFirstMessageInThread,
+    systemContext,
+  })
+  const messages = [{ role: 'user', content: firstTurnMessage }]
 
   const stream = await agent.stream(
     { messages },

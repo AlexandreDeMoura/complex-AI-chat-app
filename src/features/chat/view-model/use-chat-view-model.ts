@@ -26,6 +26,11 @@ interface RunAssistantStreamOptions {
   onCompleted?: () => void
 }
 
+interface UseChatViewModelOptions {
+  initialThreadId?: string
+  initialSystemContext?: string
+}
+
 export interface ChatViewModel {
   currentThreadId: string
   messages: ChatMessage[]
@@ -62,7 +67,7 @@ function findHumanMessageBeforeAssistant(
   return ''
 }
 
-export function useChatViewModel(): ChatViewModel {
+export function useChatViewModel(options: UseChatViewModelOptions = {}): ChatViewModel {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [threadHistory, setThreadHistory] = useState<ThreadSummary[]>([])
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([])
@@ -72,7 +77,10 @@ export function useChatViewModel(): ChatViewModel {
   const [isThreadHistoryLoading, setIsThreadHistoryLoading] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null)
-  const threadIdRef = useRef<string>(crypto.randomUUID())
+  const threadIdRef = useRef<string>(options.initialThreadId ?? crypto.randomUUID())
+  const pendingSystemContextRef = useRef<string | null>(
+    options.initialSystemContext?.trim() || null,
+  )
   const abortControllerRef = useRef<AbortController | null>(null)
   const nextMessageIdRef = useRef(1)
 
@@ -320,6 +328,7 @@ export function useChatViewModel(): ChatViewModel {
       ])
       setIsLoading(true)
       setInterrupt(null)
+      const pendingSystemContext = pendingSystemContextRef.current
 
       await runAssistantStream({
         assistantMessageId,
@@ -329,9 +338,13 @@ export function useChatViewModel(): ChatViewModel {
             threadId: threadIdRef.current,
             model: selectedModel || undefined,
             thinkingEffort: effectiveThinkingEffort,
+            systemContext: pendingSystemContext || undefined,
             signal,
           }),
         onCompleted: () => {
+          if (pendingSystemContext) {
+            pendingSystemContextRef.current = null
+          }
           void loadThreadHistory({ showLoading: false })
         },
       })
@@ -429,6 +442,7 @@ export function useChatViewModel(): ChatViewModel {
     setIsLoading(false)
     setInterrupt(null)
     threadIdRef.current = crypto.randomUUID()
+    pendingSystemContextRef.current = null
   }, [])
 
   const selectThread = useCallback((threadId: string) => {
@@ -451,6 +465,7 @@ export function useChatViewModel(): ChatViewModel {
     setIsLoading(false)
     setInterrupt(null)
     threadIdRef.current = threadId
+    pendingSystemContextRef.current = null
   }, [availableModels, threadHistory])
 
   return {
