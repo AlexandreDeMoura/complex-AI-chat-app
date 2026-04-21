@@ -447,7 +447,9 @@ function QuestionShell({
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Complete answer
                 </p>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{question.complete_answer}</p>
+                <MarkdownText density="compact" className="mt-1 text-sm">
+                  {question.complete_answer}
+                </MarkdownText>
               </div>
             </div>
           )}
