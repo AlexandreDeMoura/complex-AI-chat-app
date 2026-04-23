@@ -2,8 +2,12 @@ import { ChatAnthropic } from '@langchain/anthropic'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { extractMessageText } from '../domain/message-utils.js'
 import {
+  createCollection,
+  deleteCollectionWithOrphanStrategy,
+  listCollectionsWithCounts,
   persistBulkQuestions,
   QuizQuestionRepositoryError,
+  updateCollection,
 } from '../infrastructure/question-repository.js'
 
 const QUIZ_FEEDBACK_MODEL_ID = 'claude-sonnet-4-6'
@@ -33,6 +37,15 @@ export class QuizBulkPersistenceError extends Error {
   constructor(message, { statusCode = 500, cause, details = null } = {}) {
     super(message, { cause })
     this.name = 'QuizBulkPersistenceError'
+    this.statusCode = statusCode
+    this.details = details
+  }
+}
+
+export class QuizCollectionError extends Error {
+  constructor(message, { statusCode = 500, cause, details = null } = {}) {
+    super(message, { cause })
+    this.name = 'QuizCollectionError'
     this.statusCode = statusCode
     this.details = details
   }
@@ -111,6 +124,97 @@ export const generateQuizFeedback = async ({ question, userAnswer, completeAnswe
     })
   } finally {
     clearTimeout(timeoutId)
+  }
+}
+
+const assertQuizCollectionAuth = ({ accessToken, userId }) => {
+  if (!userId) {
+    throw new QuizCollectionError('Quiz collection access requires authentication.', {
+      statusCode: 401,
+    })
+  }
+
+  if (!accessToken) {
+    throw new QuizCollectionError('Quiz collection access requires a valid token.', {
+      statusCode: 401,
+    })
+  }
+}
+
+const toQuizCollectionError = (error, fallbackMessage) => {
+  if (error instanceof QuizCollectionError) {
+    return error
+  }
+
+  if (error instanceof QuizQuestionRepositoryError) {
+    return new QuizCollectionError(error.message, {
+      statusCode: error.statusCode,
+      cause: error,
+      details: error.details,
+    })
+  }
+
+  return new QuizCollectionError(fallbackMessage, { statusCode: 500, cause: error })
+}
+
+export const listQuizCollections = async ({ accessToken, userId }) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const collections = await listCollectionsWithCounts({ accessToken })
+    return { collections }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz collection listing failed.')
+  }
+}
+
+export const createQuizCollection = async ({ accessToken, userId, name, description }) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const collection = await createCollection({ accessToken, userId, name, description })
+    return { collection }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz collection creation failed.')
+  }
+}
+
+export const updateQuizCollection = async ({
+  accessToken,
+  userId,
+  collectionId,
+  name,
+  description,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const collection = await updateCollection({ accessToken, collectionId, name, description })
+    return { collection }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz collection update failed.')
+  }
+}
+
+export const deleteQuizCollection = async ({
+  accessToken,
+  userId,
+  collectionId,
+  orphanStrategy,
+  targetCollectionId,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const result = await deleteCollectionWithOrphanStrategy({
+      accessToken,
+      collectionId,
+      orphanStrategy,
+      targetCollectionId,
+    })
+    return result
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz collection deletion failed.')
   }
 }
 

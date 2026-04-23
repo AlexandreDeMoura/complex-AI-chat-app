@@ -5,9 +5,14 @@ import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
 import {
   QuizBulkPersistenceError,
+  QuizCollectionError,
   QuizFeedbackError,
+  createQuizCollection,
+  deleteQuizCollection,
   generateQuizFeedback,
+  listQuizCollections,
   persistQuizQuestionsBulk,
+  updateQuizCollection,
 } from './application/quiz-service.js'
 import { listThreads } from './application/thread-service.js'
 import { getAvailableModels, THINKING_EFFORT_VALUES } from './infrastructure/agent.js'
@@ -81,6 +86,43 @@ const quizBulkQuestionsSchema = z
   })
   .strict()
 
+const collectionDescriptionSchema = z.union([z.string(), z.null()])
+
+const collectionCreateSchema = z
+  .object({
+    name: z.string().trim().min(1, 'name is required.'),
+    description: collectionDescriptionSchema.optional(),
+  })
+  .strict()
+
+const collectionUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1, 'name is required.').optional(),
+    description: collectionDescriptionSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (data) => data.name !== undefined || data.description !== undefined,
+    { message: 'At least one of "name" or "description" must be provided.' },
+  )
+
+const collectionDeleteQuerySchema = z
+  .object({
+    orphan_strategy: z.enum(['delete', 'reassign']).optional(),
+    target: z.string().trim().min(1).optional(),
+  })
+  .refine(
+    (data) => data.orphan_strategy !== 'reassign' || Boolean(data.target),
+    {
+      message: 'target is required when orphan_strategy is "reassign".',
+      path: ['target'],
+    },
+  )
+
+const collectionIdParamSchema = z.object({
+  id: z.string().trim().min(1, 'Collection id is required.'),
+})
+
 app.use(cors())
 app.use(express.json())
 
@@ -130,6 +172,28 @@ const formatValidationIssues = (error) =>
     path: issue.path.join('.'),
     message: issue.message,
   }))
+
+const sendValidationError = (res, error, message) => {
+  res.status(400).json({
+    error: message,
+    issues: formatValidationIssues(error),
+  })
+}
+
+const sendQuizCollectionError = (res, error, logLabel) => {
+  if (error instanceof QuizCollectionError) {
+    const body = { error: error.message }
+    if (error.details) {
+      body.details = error.details
+    }
+    res.status(error.statusCode).json(body)
+    return
+  }
+
+  console.error(`[${logLabel}] unexpected error`, error)
+  const message = error instanceof Error ? error.message : 'Unknown server error.'
+  res.status(500).json({ error: message })
+}
 
 const quizRouter = express.Router()
 quizRouter.use(requireQuizAuth)
@@ -205,6 +269,92 @@ quizRouter.post('/questions/bulk', async (req, res) => {
     const message =
       error instanceof Error ? error.message : 'Unknown server error.'
     res.status(500).json({ error: message })
+  }
+})
+
+quizRouter.get('/collections', async (req, res) => {
+  try {
+    const result = await listQuizCollections({
+      accessToken: req.accessToken,
+      userId: req.userId,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.list')
+  }
+})
+
+quizRouter.post('/collections', async (req, res) => {
+  const payload = collectionCreateSchema.safeParse(req.body)
+  if (!payload.success) {
+    sendValidationError(res, payload.error, 'Invalid collection payload.')
+    return
+  }
+
+  try {
+    const result = await createQuizCollection({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      name: payload.data.name,
+      description: payload.data.description,
+    })
+    res.status(201).json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.create')
+  }
+})
+
+quizRouter.patch('/collections/:id', async (req, res) => {
+  const params = collectionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid collection id.')
+    return
+  }
+
+  const payload = collectionUpdateSchema.safeParse(req.body)
+  if (!payload.success) {
+    sendValidationError(res, payload.error, 'Invalid collection update payload.')
+    return
+  }
+
+  try {
+    const result = await updateQuizCollection({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      collectionId: params.data.id,
+      name: payload.data.name,
+      description: payload.data.description,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.update')
+  }
+})
+
+quizRouter.delete('/collections/:id', async (req, res) => {
+  const params = collectionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid collection id.')
+    return
+  }
+
+  const query = collectionDeleteQuerySchema.safeParse(req.query)
+  if (!query.success) {
+    sendValidationError(res, query.error, 'Invalid collection delete query.')
+    return
+  }
+
+  try {
+    const result = await deleteQuizCollection({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      collectionId: params.data.id,
+      orphanStrategy: query.data.orphan_strategy,
+      targetCollectionId: query.data.target,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.delete')
   }
 })
 
