@@ -69,3 +69,12 @@ export interface QuizCollectionQuestionRemovalResult {
   deletedQuestionIds: string[]
   reassignedQuestionIds: string[]
 }
+
+export interface QuizCollectionQuestionLinkResult {
+  collectionId: string
+  questionIds: string[]
+}
+
+export interface QuizQuestionDeleteResult {
+  id: string
+}

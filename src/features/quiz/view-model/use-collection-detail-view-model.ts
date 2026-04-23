@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  addQuizQuestionsToCollection,
   deleteQuizCollection,
   extractOrphanQuestionIdsFromDetails,
   listQuizCollectionQuestions,
   listQuizCollections,
   QuizApiError,
   removeQuizQuestionFromCollection,
+  searchQuizQuestions,
+  updateQuizQuestion,
   updateQuizCollection,
 } from '@/features/quiz/data'
 import type {
@@ -37,6 +40,7 @@ export interface OrphanResolutionState {
 export interface CollectionDetailViewModel {
   collection: QuizCollectionSummary | null
   questions: QuizCollectionQuestion[]
+  availableQuestions: QuizCollectionQuestion[]
   reassignableCollections: QuizCollectionSummary[]
   isLoadingDetail: boolean
   detailLoadError: string | null
@@ -46,11 +50,32 @@ export interface CollectionDetailViewModel {
   deleteCollectionError: string | null
   removingQuestionId: string | null
   removeQuestionError: string | null
+  isSearchingQuestions: boolean
+  searchQuestionsError: string | null
+  isAddingQuestions: boolean
+  addQuestionsError: string | null
+  updatingQuestionId: string | null
+  updateQuestionError: string | null
   orphanResolution: OrphanResolutionState | null
   refreshDetail: () => Promise<void>
   saveMetadata: (input: { name: string; description: string | null }) => Promise<boolean>
   deleteCollection: () => Promise<boolean>
   removeQuestion: (questionId: string) => Promise<boolean>
+  searchQuestions: (search: string) => Promise<void>
+  addQuestions: (questionIds: string[]) => Promise<boolean>
+  updateQuestion: (
+    questionId: string,
+    input: {
+      question: string
+      mcqQuestion: string
+      completeAnswer: string
+      mcqOptions: QuizCollectionQuestion['mcqOptions']
+      subject: string
+      difficulty: number
+    },
+  ) => Promise<boolean>
+  clearQuestionSearch: () => void
+  clearUpdateQuestionError: () => void
   dismissOrphanResolution: () => void
   setOrphanResolutionStrategy: (strategy: OrphanStrategy) => void
   setOrphanResolutionTargetCollectionId: (collectionId: string | null) => void
@@ -124,6 +149,16 @@ export function useCollectionDetailViewModel({
 
   const [removingQuestionId, setRemovingQuestionId] = useState<string | null>(null)
   const [removeQuestionError, setRemoveQuestionError] = useState<string | null>(null)
+
+  const [availableQuestions, setAvailableQuestions] = useState<QuizCollectionQuestion[]>([])
+  const [isSearchingQuestions, setIsSearchingQuestions] = useState(false)
+  const [searchQuestionsError, setSearchQuestionsError] = useState<string | null>(null)
+
+  const [isAddingQuestions, setIsAddingQuestions] = useState(false)
+  const [addQuestionsError, setAddQuestionsError] = useState<string | null>(null)
+
+  const [updatingQuestionId, setUpdatingQuestionId] = useState<string | null>(null)
+  const [updateQuestionError, setUpdateQuestionError] = useState<string | null>(null)
 
   const [orphanResolution, setOrphanResolution] = useState<OrphanResolutionState | null>(null)
 
@@ -207,6 +242,13 @@ export function useCollectionDetailViewModel({
   useEffect(() => {
     void refreshDetail()
   }, [refreshDetail])
+
+  useEffect(() => {
+    setAvailableQuestions([])
+    setSearchQuestionsError(null)
+    setAddQuestionsError(null)
+    setUpdateQuestionError(null)
+  }, [collectionId])
 
   const saveMetadata = useCallback(async ({
     name,
@@ -371,6 +413,172 @@ export function useCollectionDetailViewModel({
     }
   }, [accessToken, collectionId, openOrphanResolution])
 
+  const searchQuestions = useCallback(async (search: string) => {
+    if (!accessToken) {
+      setAvailableQuestions([])
+      setSearchQuestionsError('You need an active session to search questions.')
+      setIsSearchingQuestions(false)
+      return
+    }
+
+    setIsSearchingQuestions(true)
+    setSearchQuestionsError(null)
+
+    try {
+      const nextAvailableQuestions = await searchQuizQuestions({
+        accessToken,
+        search,
+        excludeCollectionId: collectionId,
+      })
+      setAvailableQuestions(nextAvailableQuestions)
+    } catch (error) {
+      setAvailableQuestions([])
+
+      if (error instanceof QuizApiError) {
+        const errorMessage = error.statusCode === 401
+          ? QUIZ_AUTH_ERROR_MESSAGE
+          : formatQuizApiError(error)
+        setSearchQuestionsError(errorMessage)
+      } else {
+        setSearchQuestionsError('Unable to search questions right now.')
+      }
+    } finally {
+      setIsSearchingQuestions(false)
+    }
+  }, [accessToken, collectionId])
+
+  const clearQuestionSearch = useCallback(() => {
+    setAvailableQuestions([])
+    setSearchQuestionsError(null)
+    setAddQuestionsError(null)
+  }, [])
+
+  const clearUpdateQuestionError = useCallback(() => {
+    setUpdateQuestionError(null)
+  }, [])
+
+  const addQuestions = useCallback(async (questionIds: string[]): Promise<boolean> => {
+    if (!accessToken) {
+      setAddQuestionsError('You need an active session to add questions.')
+      return false
+    }
+
+    const normalizedQuestionIds = Array.from(
+      new Set(questionIds.map((questionId) => questionId.trim()).filter((questionId) => Boolean(questionId))),
+    )
+
+    if (normalizedQuestionIds.length === 0) {
+      setAddQuestionsError('Select at least one question to add.')
+      return false
+    }
+
+    setIsAddingQuestions(true)
+    setAddQuestionsError(null)
+
+    try {
+      const result = await addQuizQuestionsToCollection({
+        accessToken,
+        collectionId,
+        questionIds: normalizedQuestionIds,
+      })
+
+      const [nextCollections, nextQuestions] = await Promise.all([
+        listQuizCollections(accessToken),
+        listQuizCollectionQuestions({ accessToken, collectionId }),
+      ])
+
+      setAllCollections(nextCollections)
+      setCollection((currentCollection) => {
+        const matchingCollection = nextCollections.find((item) => item.id === collectionId)
+        if (!matchingCollection) {
+          return currentCollection
+        }
+
+        return {
+          ...matchingCollection,
+          questionCount: nextQuestions.length,
+        }
+      })
+      setQuestions(nextQuestions)
+      setAvailableQuestions((currentQuestions) => currentQuestions.filter(
+        (candidate) => !result.questionIds.includes(candidate.id),
+      ))
+      return true
+    } catch (error) {
+      if (error instanceof QuizApiError) {
+        const errorMessage = error.statusCode === 401
+          ? QUIZ_AUTH_ERROR_MESSAGE
+          : formatQuizApiError(error)
+        setAddQuestionsError(errorMessage)
+      } else {
+        setAddQuestionsError('Unable to add questions right now.')
+      }
+      return false
+    } finally {
+      setIsAddingQuestions(false)
+    }
+  }, [accessToken, collectionId])
+
+  const updateQuestion = useCallback(async (
+    questionId: string,
+    input: {
+      question: string
+      mcqQuestion: string
+      completeAnswer: string
+      mcqOptions: QuizCollectionQuestion['mcqOptions']
+      subject: string
+      difficulty: number
+    },
+  ): Promise<boolean> => {
+    if (!accessToken) {
+      setUpdateQuestionError('You need an active session to update questions.')
+      return false
+    }
+
+    const normalizedQuestionId = questionId.trim()
+    if (!normalizedQuestionId) {
+      setUpdateQuestionError('Question id is required.')
+      return false
+    }
+
+    setUpdatingQuestionId(normalizedQuestionId)
+    setUpdateQuestionError(null)
+
+    try {
+      const updatedQuestion = await updateQuizQuestion({
+        accessToken,
+        questionId: normalizedQuestionId,
+        question: input.question,
+        mcqQuestion: input.mcqQuestion,
+        completeAnswer: input.completeAnswer,
+        mcqOptions: input.mcqOptions,
+        subject: input.subject,
+        difficulty: input.difficulty,
+      })
+
+      setQuestions((previousQuestions) => previousQuestions.map((question) =>
+        question.id === normalizedQuestionId ? updatedQuestion : question))
+
+      setAvailableQuestions((previousQuestions) => previousQuestions.map((question) =>
+        question.id === normalizedQuestionId ? updatedQuestion : question))
+
+      return true
+    } catch (error) {
+      if (error instanceof QuizApiError) {
+        const errorMessage = error.statusCode === 401
+          ? QUIZ_AUTH_ERROR_MESSAGE
+          : formatQuizApiError(error)
+        setUpdateQuestionError(errorMessage)
+      } else {
+        setUpdateQuestionError('Unable to update this question right now.')
+      }
+      return false
+    } finally {
+      setUpdatingQuestionId((currentUpdatingQuestionId) =>
+        currentUpdatingQuestionId === normalizedQuestionId ? null : currentUpdatingQuestionId)
+    }
+  }, [accessToken])
+
   const dismissOrphanResolution = useCallback(() => {
     setOrphanResolution(null)
   }, [])
@@ -528,6 +736,7 @@ export function useCollectionDetailViewModel({
   return useMemo<CollectionDetailViewModel>(() => ({
     collection,
     questions,
+    availableQuestions,
     reassignableCollections,
     isLoadingDetail,
     detailLoadError,
@@ -537,11 +746,22 @@ export function useCollectionDetailViewModel({
     deleteCollectionError,
     removingQuestionId,
     removeQuestionError,
+    isSearchingQuestions,
+    searchQuestionsError,
+    isAddingQuestions,
+    addQuestionsError,
+    updatingQuestionId,
+    updateQuestionError,
     orphanResolution,
     refreshDetail,
     saveMetadata,
     deleteCollection,
     removeQuestion,
+    searchQuestions,
+    addQuestions,
+    updateQuestion,
+    clearQuestionSearch,
+    clearUpdateQuestionError,
     dismissOrphanResolution,
     setOrphanResolutionStrategy,
     setOrphanResolutionTargetCollectionId,
@@ -549,6 +769,7 @@ export function useCollectionDetailViewModel({
   }), [
     collection,
     questions,
+    availableQuestions,
     reassignableCollections,
     isLoadingDetail,
     detailLoadError,
@@ -558,11 +779,22 @@ export function useCollectionDetailViewModel({
     deleteCollectionError,
     removingQuestionId,
     removeQuestionError,
+    isSearchingQuestions,
+    searchQuestionsError,
+    isAddingQuestions,
+    addQuestionsError,
+    updatingQuestionId,
+    updateQuestionError,
     orphanResolution,
     refreshDetail,
     saveMetadata,
     deleteCollection,
     removeQuestion,
+    searchQuestions,
+    addQuestions,
+    updateQuestion,
+    clearQuestionSearch,
+    clearUpdateQuestionError,
     dismissOrphanResolution,
     setOrphanResolutionStrategy,
     setOrphanResolutionTargetCollectionId,
