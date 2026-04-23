@@ -114,7 +114,13 @@ export const generateQuizFeedback = async ({ question, userAnswer, completeAnswe
   }
 }
 
-export const persistQuizQuestionsBulk = async ({ accessToken, userId, questions }) => {
+export const persistQuizQuestionsBulk = async ({
+  accessToken,
+  userId,
+  questions,
+  collectionNameOverrides,
+  mergeIntoCollectionId,
+}) => {
   if (!userId) {
     throw new QuizBulkPersistenceError('Quiz question persistence requires authentication.', {
       statusCode: 401,
@@ -131,6 +137,8 @@ export const persistQuizQuestionsBulk = async ({ accessToken, userId, questions 
     const result = await persistBulkQuestions({
       accessToken,
       questions,
+      collectionNameOverrides,
+      mergeIntoCollectionId,
     })
 
     return {

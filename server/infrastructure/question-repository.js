@@ -73,6 +73,65 @@ const normalizeOptionalText = (value) => {
   return trimmed.length > 0 ? trimmed : null
 }
 
+const normalizeBulkCollectionNameOverrides = (value) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new QuizQuestionRepositoryError('"collectionNameOverrides" must be an object map.', {
+      statusCode: 400,
+    })
+  }
+
+  const normalized = {}
+
+  for (const [rawSubject, rawCollectionName] of Object.entries(value)) {
+    const subject = rawSubject.trim()
+    if (!subject) {
+      continue
+    }
+
+    if (typeof rawCollectionName !== 'string') {
+      throw new QuizQuestionRepositoryError(
+        'Each collection override value must be a non-empty string.',
+        {
+          statusCode: 400,
+          details: { subject },
+        },
+      )
+    }
+
+    const collectionName = rawCollectionName.trim()
+    if (!collectionName) {
+      continue
+    }
+
+    normalized[subject] = collectionName
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null
+}
+
+const normalizeOptionalUuidInput = (value, { field }) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    throw new QuizQuestionRepositoryError(`"${field}" must be a UUID string.`, {
+      statusCode: 400,
+    })
+  }
+
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  return normalized
+}
+
 const normalizeRequiredText = (value, { field }) => {
   if (typeof value !== 'string') {
     throw new QuizQuestionRepositoryError(`"${field}" must be a non-empty string.`, {
@@ -332,22 +391,32 @@ const normalizeRpcPayload = (data, { fallbackMessage }) => {
   return data
 }
 
-export const persistBulkQuestions = async ({ accessToken, questions }) => {
+export const persistBulkQuestions = async ({
+  accessToken,
+  questions,
+  collectionNameOverrides,
+  mergeIntoCollectionId,
+}) => {
+  const normalizedMergeIntoCollectionId = normalizeOptionalUuidInput(mergeIntoCollectionId, {
+    field: 'mergeIntoCollectionId',
+  })
+  const normalizedCollectionNameOverrides = normalizedMergeIntoCollectionId
+    ? null
+    : normalizeBulkCollectionNameOverrides(collectionNameOverrides)
+
   const supabase = createSupabaseRequestClient(accessToken)
   const { data, error } = await supabase.rpc(BULK_INSERT_RPC_NAME, {
     p_questions: questions,
+    p_collection_name_overrides: normalizedCollectionNameOverrides,
+    p_merge_into_collection_id: normalizedMergeIntoCollectionId,
   })
 
   if (error) {
-    const details = extractSupabaseErrorDetails(error)
-    const statusCode = error.code === POSTGRES_RLS_VIOLATION ? 401 : 500
-    const message = details?.message
-      ? `Failed to persist quiz questions in bulk: ${details.message}`
-      : 'Failed to persist quiz questions in bulk.'
-    throw new QuizQuestionRepositoryError(message, {
-      statusCode,
-      cause: error,
-      details,
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to persist quiz questions in bulk.',
+      invalidMessage: 'Invalid bulk question persistence options.',
+      notFoundMessage: 'Merge target collection not found.',
+      unauthorizedMessage: 'Quiz question persistence requires authentication.',
     })
   }
 
