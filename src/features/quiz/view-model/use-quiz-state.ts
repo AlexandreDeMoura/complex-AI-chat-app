@@ -25,6 +25,23 @@ interface UseQuizStateOptions {
   accessToken: string | null
 }
 
+function formatQuizApiErrorDetails(details: unknown): string[] {
+  if (!details || typeof details !== 'object') {
+    return []
+  }
+
+  const entries: string[] = []
+  for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+    if (value === null || value === undefined || value === '') {
+      continue
+    }
+    const formatted = typeof value === 'string' ? value : JSON.stringify(value)
+    entries.push(`${key}: ${formatted}`)
+  }
+
+  return entries
+}
+
 function createInitialQuestionState(): QuizQuestionState {
   return {
     mode: 'open',
@@ -206,9 +223,16 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
       setUploadError(null)
     } catch (error) {
       if (error instanceof QuizApiError) {
-        const errorDetails = error.statusCode === 401
-          ? [QUIZ_AUTH_ERROR_MESSAGE]
-          : [error.message]
+        console.error('[quiz.upload] persistence failed', {
+          statusCode: error.statusCode,
+          message: error.message,
+          details: error.details,
+        })
+
+        const errorDetails =
+          error.statusCode === 401
+            ? [QUIZ_AUTH_ERROR_MESSAGE]
+            : [error.message, ...formatQuizApiErrorDetails(error.details)]
 
         setUploadError({
           title: error.statusCode === 401 ? 'Session expired' : 'Quiz persistence failed',

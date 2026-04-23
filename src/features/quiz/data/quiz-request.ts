@@ -1,14 +1,17 @@
 interface QuizApiErrorPayload {
   error?: string
+  details?: unknown
 }
 
 export class QuizApiError extends Error {
   statusCode: number
+  details: unknown
 
-  constructor(message: string, statusCode: number) {
+  constructor(message: string, statusCode: number, details: unknown = null) {
     super(message)
     this.name = 'QuizApiError'
     this.statusCode = statusCode
+    this.details = details
   }
 }
 
@@ -31,8 +34,9 @@ export async function parseQuizApiError(
   try {
     const payload = (await response.json()) as QuizApiErrorPayload
     const errorMessage = typeof payload.error === 'string' ? payload.error.trim() : ''
+    const details = payload.details ?? null
     if (errorMessage) {
-      return new QuizApiError(errorMessage, response.status)
+      return new QuizApiError(errorMessage, response.status, details)
     }
   } catch {}
 

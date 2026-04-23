@@ -30,10 +30,11 @@ export class QuizFeedbackError extends Error {
 }
 
 export class QuizBulkPersistenceError extends Error {
-  constructor(message, { statusCode = 500, cause } = {}) {
+  constructor(message, { statusCode = 500, cause, details = null } = {}) {
     super(message, { cause })
     this.name = 'QuizBulkPersistenceError'
     this.statusCode = statusCode
+    this.details = details
   }
 }
 
@@ -142,6 +143,7 @@ export const persistQuizQuestionsBulk = async ({ accessToken, userId, questions 
       throw new QuizBulkPersistenceError(error.message, {
         statusCode: error.statusCode,
         cause: error,
+        details: error.details,
       })
     }
 

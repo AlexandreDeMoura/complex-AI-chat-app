@@ -187,10 +187,21 @@ quizRouter.post('/questions/bulk', async (req, res) => {
     res.status(201).json(result)
   } catch (error) {
     if (error instanceof QuizBulkPersistenceError) {
-      res.status(error.statusCode).json({ error: error.message })
+      console.error('[quiz.bulk] persistence failed', {
+        statusCode: error.statusCode,
+        message: error.message,
+        details: error.details,
+        cause: error.cause,
+      })
+      const body = { error: error.message }
+      if (error.details) {
+        body.details = error.details
+      }
+      res.status(error.statusCode).json(body)
       return
     }
 
+    console.error('[quiz.bulk] unexpected error', error)
     const message =
       error instanceof Error ? error.message : 'Unknown server error.'
     res.status(500).json({ error: message })
