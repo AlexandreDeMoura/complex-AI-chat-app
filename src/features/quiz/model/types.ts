@@ -1,9 +1,10 @@
 import type { QuizOption } from '@/features/quiz/model/schema'
 
-export type QuizScreen = 'upload' | 'question'
+export type QuizScreen = 'upload' | 'review' | 'question'
 export type QuizMode = 'open' | 'mcq'
 export type QuizFeedbackStatus = 'idle' | 'loading' | 'success' | 'error'
 export type OrphanStrategy = 'delete' | 'reassign'
+export type QuizUploadReviewMergeMode = 'subject' | 'existing' | 'new'
 
 export interface QuizUploadError {
   title: string
@@ -31,6 +32,12 @@ export interface QuizQuestionState {
   open: OpenModeAnswerState
   mcq: McqModeAnswerState
   feedback: QuizFeedbackState
+}
+
+export interface QuizUploadReviewCollection {
+  subject: string
+  questionCount: number
+  collectionName: string
 }
 
 export interface QuizCollectionSummary {

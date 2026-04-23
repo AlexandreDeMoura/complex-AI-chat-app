@@ -10,6 +10,8 @@ export type {
   QuizCollectionQuestionLinkResult,
   QuizCollectionQuestionRemovalResult,
   QuizCollectionSummary,
+  QuizUploadReviewCollection,
+  QuizUploadReviewMergeMode,
   QuizQuestionDeleteResult,
   McqModeAnswerState,
   OpenModeAnswerState,

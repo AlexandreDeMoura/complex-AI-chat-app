@@ -17,9 +17,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/features/auth/view-model'
 import { QUIZ_UPLOAD_MAX_SIZE_BYTES } from '@/features/quiz/data'
 import type {
+  QuizCollectionSummary,
   QuizFeedbackStatus,
   QuizMode,
   QuizQuestion,
+  QuizUploadReviewCollection,
+  QuizUploadReviewMergeMode,
   QuizUploadError,
 } from '@/features/quiz/model'
 import { useQuizState } from '@/features/quiz/view-model'
@@ -38,7 +41,16 @@ export function QuizPage() {
     screen,
     mode,
     isUploading,
+    isLoadingReviewCollections,
     uploadError,
+    reviewCollections,
+    reviewMergeMode,
+    reviewExistingCollections,
+    reviewExistingCollectionId,
+    reviewNewCollectionName,
+    reviewNewCollectionDescription,
+    reviewCollectionsLoadError,
+    canConfirmUploadReview,
     questionCount,
     totalQuestionCount,
     currentQuestion,
@@ -68,6 +80,14 @@ export function QuizPage() {
     goToNextQuestion,
     setSubjectFilter,
     uploadQuizFile,
+    setReviewCollectionName,
+    setReviewMergeMode,
+    setReviewExistingCollectionId,
+    setReviewNewCollectionName,
+    setReviewNewCollectionDescription,
+    refreshReviewCollections,
+    confirmUploadReview,
+    cancelUploadReview,
     finishQuiz,
     returnToUpload,
     openQuizChatHandoff,
@@ -127,13 +147,35 @@ export function QuizPage() {
 
       <main className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 pb-6">
-          {screen === 'upload' || !currentQuestion ? (
+          {screen === 'upload' ? (
             <UploadShell
               isUploading={isUploading}
               uploadError={uploadError}
               onUploadQuizFile={uploadQuizFile}
             />
-          ) : (
+          ) : screen === 'review' ? (
+            <UploadReviewShell
+              isUploading={isUploading}
+              isLoadingReviewCollections={isLoadingReviewCollections}
+              uploadError={uploadError}
+              reviewCollections={reviewCollections}
+              reviewMergeMode={reviewMergeMode}
+              reviewExistingCollections={reviewExistingCollections}
+              reviewExistingCollectionId={reviewExistingCollectionId}
+              reviewNewCollectionName={reviewNewCollectionName}
+              reviewNewCollectionDescription={reviewNewCollectionDescription}
+              reviewCollectionsLoadError={reviewCollectionsLoadError}
+              canConfirmUploadReview={canConfirmUploadReview}
+              onReviewCollectionNameChange={setReviewCollectionName}
+              onReviewMergeModeChange={setReviewMergeMode}
+              onReviewExistingCollectionChange={setReviewExistingCollectionId}
+              onReviewNewCollectionNameChange={setReviewNewCollectionName}
+              onReviewNewCollectionDescriptionChange={setReviewNewCollectionDescription}
+              onRefreshReviewCollections={refreshReviewCollections}
+              onConfirmUploadReview={confirmUploadReview}
+              onCancelUploadReview={cancelUploadReview}
+            />
+          ) : currentQuestion ? (
             <QuestionShell
               question={currentQuestion}
               questionNumber={currentQuestionIndex + 1}
@@ -164,6 +206,12 @@ export function QuizPage() {
               onBackToUpload={returnToUpload}
               onAskGuidance={openQuizChatHandoff}
               onSubjectFilterChange={setSubjectFilter}
+            />
+          ) : (
+            <UploadShell
+              isUploading={isUploading}
+              uploadError={uploadError}
+              onUploadQuizFile={uploadQuizFile}
             />
           )}
         </div>
@@ -210,7 +258,7 @@ function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShell
           </div>
           <p className="text-sm font-medium">Select a `.json` file</p>
           <p className="text-muted-foreground mt-1 text-xs">
-            On success, the quiz opens at question 1.
+            After validation, review detected collections before importing.
           </p>
           <input
             type="file"
@@ -225,6 +273,251 @@ function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShell
       </div>
 
       {uploadError && <UploadErrorPanel error={uploadError} />}
+    </section>
+  )
+}
+
+interface UploadReviewShellProps {
+  isUploading: boolean
+  isLoadingReviewCollections: boolean
+  uploadError: QuizUploadError | null
+  reviewCollections: QuizUploadReviewCollection[]
+  reviewMergeMode: QuizUploadReviewMergeMode
+  reviewExistingCollections: QuizCollectionSummary[]
+  reviewExistingCollectionId: string | null
+  reviewNewCollectionName: string
+  reviewNewCollectionDescription: string
+  reviewCollectionsLoadError: string | null
+  canConfirmUploadReview: boolean
+  onReviewCollectionNameChange: (subject: string, collectionName: string) => void
+  onReviewMergeModeChange: (mode: QuizUploadReviewMergeMode) => void
+  onReviewExistingCollectionChange: (collectionId: string | null) => void
+  onReviewNewCollectionNameChange: (name: string) => void
+  onReviewNewCollectionDescriptionChange: (description: string) => void
+  onRefreshReviewCollections: () => Promise<void>
+  onConfirmUploadReview: () => Promise<void>
+  onCancelUploadReview: () => void
+}
+
+function UploadReviewShell({
+  isUploading,
+  isLoadingReviewCollections,
+  uploadError,
+  reviewCollections,
+  reviewMergeMode,
+  reviewExistingCollections,
+  reviewExistingCollectionId,
+  reviewNewCollectionName,
+  reviewNewCollectionDescription,
+  reviewCollectionsLoadError,
+  canConfirmUploadReview,
+  onReviewCollectionNameChange,
+  onReviewMergeModeChange,
+  onReviewExistingCollectionChange,
+  onReviewNewCollectionNameChange,
+  onReviewNewCollectionDescriptionChange,
+  onRefreshReviewCollections,
+  onConfirmUploadReview,
+  onCancelUploadReview,
+}: UploadReviewShellProps) {
+  const reviewQuestionCount = reviewCollections.reduce(
+    (totalCount, collection) => totalCount + collection.questionCount,
+    0,
+  )
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Review import before saving</h1>
+      <p className="text-muted-foreground mt-2 text-sm">
+        Confirm collection grouping, rename auto-detected collections, or merge everything into one collection.
+      </p>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border bg-muted/20 p-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Questions
+          </p>
+          <p className="mt-1 text-xl font-semibold">{reviewQuestionCount}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-muted/20 p-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Detected subjects
+          </p>
+          <p className="mt-1 text-xl font-semibold">{reviewCollections.length}</p>
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-3">
+        <p className="text-sm font-semibold">Import strategy</p>
+        <label className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2">
+          <input
+            type="radio"
+            name="quiz-import-strategy"
+            className="mt-1"
+            checked={reviewMergeMode === 'subject'}
+            onChange={() => onReviewMergeModeChange('subject')}
+            disabled={isUploading}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Keep subject-based collections</span>
+            <span className="text-muted-foreground mt-0.5 block text-xs">
+              One collection per detected subject, with optional renames below.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2">
+          <input
+            type="radio"
+            name="quiz-import-strategy"
+            className="mt-1"
+            checked={reviewMergeMode === 'existing'}
+            onChange={() => onReviewMergeModeChange('existing')}
+            disabled={isUploading}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Merge all into an existing collection</span>
+            <span className="text-muted-foreground mt-0.5 block text-xs">
+              Every imported question is added to a single collection you already have.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2">
+          <input
+            type="radio"
+            name="quiz-import-strategy"
+            className="mt-1"
+            checked={reviewMergeMode === 'new'}
+            onChange={() => onReviewMergeModeChange('new')}
+            disabled={isUploading}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Merge all into a new collection</span>
+            <span className="text-muted-foreground mt-0.5 block text-xs">
+              A new collection is created before bulk import, then all questions are linked to it.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {reviewMergeMode === 'existing' && (
+        <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">Select merge target collection</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isLoadingReviewCollections || isUploading}
+              onClick={() => {
+                void onRefreshReviewCollections()
+              }}
+            >
+              {isLoadingReviewCollections ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                'Refresh'
+              )}
+            </Button>
+          </div>
+
+          <select
+            value={reviewExistingCollectionId ?? ''}
+            onChange={(event) => onReviewExistingCollectionChange(event.target.value || null)}
+            disabled={isUploading || isLoadingReviewCollections || reviewExistingCollections.length === 0}
+            className="mt-3 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <option value="">
+              {reviewExistingCollections.length === 0
+                ? 'No collections available'
+                : 'Select a collection'}
+            </option>
+            {reviewExistingCollections.map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {collection.name} ({collection.questionCount} question{collection.questionCount === 1 ? '' : 's'})
+              </option>
+            ))}
+          </select>
+
+          {reviewCollectionsLoadError ? (
+            <p className="mt-2 text-xs text-destructive">{reviewCollectionsLoadError}</p>
+          ) : null}
+        </div>
+      )}
+
+      {reviewMergeMode === 'new' && (
+        <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4">
+          <p className="text-sm font-medium">New collection details</p>
+          <div className="mt-3 grid gap-3">
+            <input
+              value={reviewNewCollectionName}
+              onChange={(event) => onReviewNewCollectionNameChange(event.target.value)}
+              placeholder="Collection name"
+              className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+              disabled={isUploading}
+              maxLength={120}
+            />
+            <input
+              value={reviewNewCollectionDescription}
+              onChange={(event) => onReviewNewCollectionDescriptionChange(event.target.value)}
+              placeholder="Description (optional)"
+              className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+              disabled={isUploading}
+              maxLength={300}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 rounded-xl border border-border">
+        <div className="border-b border-border px-4 py-3">
+          <p className="text-sm font-semibold">Detected collections</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            Auto-grouped by `subject`. Rename before importing if needed.
+          </p>
+        </div>
+        <div className="divide-y divide-border">
+          {reviewCollections.map((collection) => {
+            const subjectLabel = collection.subject || '(empty subject)'
+
+            return (
+              <div key={collection.subject} className="grid gap-3 px-4 py-3 sm:grid-cols-[1.2fr_110px_1.4fr] sm:items-center">
+                <p className="text-sm font-medium">{subjectLabel}</p>
+                <p className="text-xs text-muted-foreground">
+                  {collection.questionCount} question{collection.questionCount === 1 ? '' : 's'}
+                </p>
+                <input
+                  value={collection.collectionName}
+                  onChange={(event) => onReviewCollectionNameChange(collection.subject, event.target.value)}
+                  disabled={isUploading || reviewMergeMode !== 'subject'}
+                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                  maxLength={120}
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {uploadError && <UploadErrorPanel error={uploadError} />}
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+        <Button type="button" variant="ghost" onClick={onCancelUploadReview} disabled={isUploading}>
+          Back to upload
+        </Button>
+        <Button
+          type="button"
+          onClick={() => {
+            void onConfirmUploadReview()
+          }}
+          disabled={!canConfirmUploadReview}
+          className="gap-2"
+        >
+          {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
+          Confirm and import
+        </Button>
+      </div>
     </section>
   )
 }

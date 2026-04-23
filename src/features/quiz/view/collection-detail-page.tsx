@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -338,6 +339,12 @@ export function CollectionDetailPage() {
               <Link to="/quiz/collections" className="gap-2">
                 <BookCopy className="size-4" />
                 Back to collections
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/quiz" className="gap-2">
+                <Upload className="size-4" />
+                Import questions
               </Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>
