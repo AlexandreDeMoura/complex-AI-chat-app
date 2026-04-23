@@ -74,6 +74,11 @@ export function Thread() {
     if (!isDesktop) setSidebarOpen(false)
   }, [isDesktop, navigate])
 
+  const handleNavigateCollections = useCallback(() => {
+    navigate('/quiz/collections')
+    if (!isDesktop) setSidebarOpen(false)
+  }, [isDesktop, navigate])
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <ThreadSidebarShell
@@ -84,6 +89,7 @@ export function Thread() {
         isLoading={isThreadHistoryLoading}
         onOpenChange={setSidebarOpen}
         onNavigateQuiz={handleNavigateQuiz}
+        onNavigateCollections={handleNavigateCollections}
         onSelectThread={handleSelectThread}
         onNewThread={handleNewThread}
       />

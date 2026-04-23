@@ -18,6 +18,7 @@ interface ThreadSidebarShellProps {
   isLoading: boolean
   onOpenChange: (open: boolean) => void
   onNavigateQuiz: () => void
+  onNavigateCollections: () => void
   onSelectThread: (threadId: string) => void
   onNewThread: () => void
 }
@@ -30,6 +31,7 @@ export function ThreadSidebarShell({
   isLoading,
   onOpenChange,
   onNavigateQuiz,
+  onNavigateCollections,
   onSelectThread,
   onNewThread,
 }: ThreadSidebarShellProps) {
@@ -39,6 +41,7 @@ export function ThreadSidebarShell({
       threads={threads}
       isLoading={isLoading}
       onNavigateQuiz={onNavigateQuiz}
+      onNavigateCollections={onNavigateCollections}
       onSelectThread={onSelectThread}
       onNewThread={onNewThread}
     />

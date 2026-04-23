@@ -29,3 +29,12 @@ export interface QuizQuestionState {
   mcq: McqModeAnswerState
   feedback: QuizFeedbackState
 }
+
+export interface QuizCollectionSummary {
+  id: string
+  name: string
+  description: string | null
+  questionCount: number
+  createdAt: string
+  updatedAt: string
+}

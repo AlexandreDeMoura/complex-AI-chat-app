@@ -1,4 +1,4 @@
-import { FileQuestion, SquarePen } from 'lucide-react'
+import { BookCopy, FileQuestion, SquarePen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -9,6 +9,7 @@ interface ThreadHistoryProps {
   threads: ThreadSummary[]
   isLoading: boolean
   onNavigateQuiz: () => void
+  onNavigateCollections: () => void
   onSelectThread: (threadId: string) => void
   onNewThread: () => void
 }
@@ -18,20 +19,31 @@ export function ThreadHistory({
   threads,
   isLoading,
   onNavigateQuiz,
+  onNavigateCollections,
   onSelectThread,
   onNewThread,
 }: ThreadHistoryProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-sidebar-border p-3">
-        <Button
-          variant="secondary"
-          className="h-9 w-full justify-start rounded-xl text-sm font-medium"
-          onClick={onNavigateQuiz}
-        >
-          <FileQuestion className="size-4" />
-          Quiz
-        </Button>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="secondary"
+            className="h-9 w-full justify-start rounded-xl text-sm font-medium"
+            onClick={onNavigateQuiz}
+          >
+            <FileQuestion className="size-4" />
+            Quiz
+          </Button>
+          <Button
+            variant="secondary"
+            className="h-9 w-full justify-start rounded-xl text-sm font-medium"
+            onClick={onNavigateCollections}
+          >
+            <BookCopy className="size-4" />
+            Collections
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
