@@ -1,6 +1,10 @@
 import { ChatAnthropic } from '@langchain/anthropic'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { extractMessageText } from '../domain/message-utils.js'
+import {
+  persistBulkQuestions,
+  QuizQuestionRepositoryError,
+} from '../infrastructure/question-repository.js'
 
 const QUIZ_FEEDBACK_MODEL_ID = 'claude-sonnet-4-6'
 const QUIZ_FEEDBACK_TIMEOUT_MS = 30_000
@@ -21,6 +25,14 @@ export class QuizFeedbackError extends Error {
   constructor(message, { statusCode = 500, cause } = {}) {
     super(message, { cause })
     this.name = 'QuizFeedbackError'
+    this.statusCode = statusCode
+  }
+}
+
+export class QuizBulkPersistenceError extends Error {
+  constructor(message, { statusCode = 500, cause } = {}) {
+    super(message, { cause })
+    this.name = 'QuizBulkPersistenceError'
     this.statusCode = statusCode
   }
 }
@@ -98,5 +110,44 @@ export const generateQuizFeedback = async ({ question, userAnswer, completeAnswe
     })
   } finally {
     clearTimeout(timeoutId)
+  }
+}
+
+export const persistQuizQuestionsBulk = async ({ accessToken, userId, questions }) => {
+  if (!userId) {
+    throw new QuizBulkPersistenceError('Quiz question persistence requires authentication.', {
+      statusCode: 401,
+    })
+  }
+
+  if (!accessToken) {
+    throw new QuizBulkPersistenceError('Quiz question persistence requires a valid token.', {
+      statusCode: 401,
+    })
+  }
+
+  try {
+    const result = await persistBulkQuestions({
+      accessToken,
+      questions,
+    })
+
+    return {
+      userId,
+      questionIds: result.questionIds,
+      collectionIds: result.collectionIds,
+    }
+  } catch (error) {
+    if (error instanceof QuizQuestionRepositoryError) {
+      throw new QuizBulkPersistenceError(error.message, {
+        statusCode: error.statusCode,
+        cause: error,
+      })
+    }
+
+    throw new QuizBulkPersistenceError('Quiz question bulk persistence failed.', {
+      statusCode: 500,
+      cause: error,
+    })
   }
 }

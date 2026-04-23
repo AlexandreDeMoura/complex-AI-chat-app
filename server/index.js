@@ -3,9 +3,15 @@ import 'dotenv/config'
 import express from 'express'
 import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
-import { QuizFeedbackError, generateQuizFeedback } from './application/quiz-service.js'
+import {
+  QuizBulkPersistenceError,
+  QuizFeedbackError,
+  generateQuizFeedback,
+  persistQuizQuestionsBulk,
+} from './application/quiz-service.js'
 import { listThreads } from './application/thread-service.js'
 import { getAvailableModels, THINKING_EFFORT_VALUES } from './infrastructure/agent.js'
+import { requireQuizAuth } from './interface/quiz-auth-middleware.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 8788)
@@ -32,6 +38,46 @@ const quizFeedbackSchema = z
     question: z.string().trim().min(1, 'question is required.'),
     user_answer: z.string().trim().min(1, 'user_answer is required.'),
     complete_answer: z.string().trim().min(1, 'complete_answer is required.'),
+  })
+  .strict()
+
+const quizOptionSchema = z
+  .object({
+    option: z.string().trim().min(1, 'option is required.'),
+    is_correct: z.boolean(),
+  })
+  .strict()
+
+const quizQuestionSchema = z
+  .object({
+    question: z.string().trim().min(1, 'question is required.'),
+    mcq_question: z.string().trim().min(1, 'mcq_question is required.'),
+    complete_answer: z.string().trim().min(1, 'complete_answer is required.'),
+    mcq_options: z
+      .array(quizOptionSchema)
+      .length(4, 'mcq_options must contain exactly 4 options.'),
+    subject: z.string().trim().min(1, 'subject is required.'),
+    difficulty: z
+      .number()
+      .int('difficulty must be an integer.')
+      .min(-32768)
+      .max(32767),
+  })
+  .strict()
+  .superRefine((question, ctx) => {
+    const correctOptions = question.mcq_options.filter((option) => option.is_correct).length
+    if (correctOptions !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['mcq_options'],
+        message: 'mcq_options must include exactly one correct option.',
+      })
+    }
+  })
+
+const quizBulkQuestionsSchema = z
+  .object({
+    questions: z.array(quizQuestionSchema).min(1, 'At least one quiz question is required.'),
   })
   .strict()
 
@@ -85,7 +131,10 @@ const formatValidationIssues = (error) =>
     message: issue.message,
   }))
 
-app.post('/api/quiz/feedback', async (req, res) => {
+const quizRouter = express.Router()
+quizRouter.use(requireQuizAuth)
+
+quizRouter.post('/feedback', async (req, res) => {
   const payload = quizFeedbackSchema.safeParse(req.body)
   if (!payload.success) {
     res.status(400).json({
@@ -114,6 +163,41 @@ app.post('/api/quiz/feedback', async (req, res) => {
     res.status(500).json({ error: message })
   }
 })
+
+quizRouter.post('/questions/bulk', async (req, res) => {
+  const payload = quizBulkQuestionsSchema.safeParse(req.body)
+  if (!payload.success) {
+    res.status(400).json({
+      error: 'Invalid quiz questions payload.',
+      issues: formatValidationIssues(payload.error),
+    })
+    return
+  }
+
+  const userId = typeof req.userId === 'string' ? req.userId : ''
+  const accessToken = typeof req.accessToken === 'string' ? req.accessToken : ''
+
+  try {
+    const result = await persistQuizQuestionsBulk({
+      accessToken,
+      userId,
+      questions: payload.data.questions,
+    })
+
+    res.status(201).json(result)
+  } catch (error) {
+    if (error instanceof QuizBulkPersistenceError) {
+      res.status(error.statusCode).json({ error: error.message })
+      return
+    }
+
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error.'
+    res.status(500).json({ error: message })
+  }
+})
+
+app.use('/api/quiz', quizRouter)
 
 app.post('/api/chat', async (req, res) => {
   try {
