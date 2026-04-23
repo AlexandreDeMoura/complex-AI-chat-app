@@ -1,4 +1,7 @@
+import { createAuthorizedJsonHeaders, parseQuizApiError } from '@/features/quiz/data/quiz-request'
+
 interface FetchFeedbackParams {
+  accessToken: string
   question: string
   userAnswer: string
   completeAnswer: string
@@ -8,20 +11,15 @@ interface FeedbackApiResponse {
   feedback: string
 }
 
-interface FeedbackApiError {
-  error?: string
-}
-
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
-
 export async function fetchFeedback({
+  accessToken,
   question,
   userAnswer,
   completeAnswer,
 }: FetchFeedbackParams): Promise<string> {
   const response = await fetch('/api/quiz/feedback', {
     method: 'POST',
-    headers: JSON_HEADERS,
+    headers: createAuthorizedJsonHeaders(accessToken),
     body: JSON.stringify({
       question,
       user_answer: userAnswer,
@@ -30,7 +28,7 @@ export async function fetchFeedback({
   })
 
   if (!response.ok) {
-    throw new Error(await parseFeedbackError(response))
+    throw await parseQuizApiError(response, 'Feedback request failed.')
   }
 
   const payload = (await response.json()) as FeedbackApiResponse
@@ -41,17 +39,4 @@ export async function fetchFeedback({
   }
 
   return feedback
-}
-
-async function parseFeedbackError(response: Response): Promise<string> {
-  try {
-    const payload = (await response.json()) as FeedbackApiError
-    if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
-      return payload.error
-    }
-  } catch {
-    // Ignore JSON parse failures and fall back to a generic status message.
-  }
-
-  return `Feedback request failed with status ${response.status}.`
 }

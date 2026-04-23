@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { fetchFeedback, parseQuizUploadFile } from '@/features/quiz/data'
+import {
+  fetchFeedback,
+  parseQuizUploadFile,
+  persistQuizQuestionsBulk,
+  QuizApiError,
+} from '@/features/quiz/data'
 import type {
   QuizFeedbackState,
   QuizFeedbackStatus,
@@ -13,6 +18,12 @@ import { buildQuizPrelude } from '@/features/quiz/model'
 
 const QUIZ_FEEDBACK_ERROR_MESSAGE =
   'Feedback is unavailable for this answer. You can continue the quiz.'
+const QUIZ_AUTH_ERROR_MESSAGE =
+  'Your session is no longer valid. Sign in again to continue with quiz actions.'
+
+interface UseQuizStateOptions {
+  accessToken: string | null
+}
 
 function createInitialQuestionState(): QuizQuestionState {
   return {
@@ -79,7 +90,7 @@ export interface QuizViewModel {
   closeQuizChatHandoff: () => void
 }
 
-export function useQuizState(): QuizViewModel {
+export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewModel {
   const [screen, setScreen] = useState<QuizScreen>('upload')
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [questionStates, setQuestionStates] = useState<QuizQuestionState[]>([])
@@ -174,12 +185,39 @@ export function useQuizState(): QuizViewModel {
         return
       }
 
+      if (!accessToken) {
+        setUploadError({
+          title: 'Session expired',
+          details: [QUIZ_AUTH_ERROR_MESSAGE],
+        })
+        resetQuizSession()
+        return
+      }
+
+      await persistQuizQuestionsBulk({
+        accessToken,
+        questions: uploadResult.questions,
+      })
+
       setQuestions(uploadResult.questions)
       setQuestionStates(uploadResult.questions.map(() => createInitialQuestionState()))
       setCurrentQuestionIndex(0)
       setScreen('question')
       setUploadError(null)
-    } catch {
+    } catch (error) {
+      if (error instanceof QuizApiError) {
+        const errorDetails = error.statusCode === 401
+          ? [QUIZ_AUTH_ERROR_MESSAGE]
+          : [error.message]
+
+        setUploadError({
+          title: error.statusCode === 401 ? 'Session expired' : 'Quiz persistence failed',
+          details: errorDetails,
+        })
+        resetQuizSession()
+        return
+      }
+
       setUploadError({
         title: 'File processing failed',
         details: ['An unexpected error occurred while reading the file. Try again.'],
@@ -188,7 +226,7 @@ export function useQuizState(): QuizViewModel {
     } finally {
       setIsUploading(false)
     }
-  }, [resetQuizSession])
+  }, [accessToken, resetQuizSession])
 
   const requestOpenAnswerFeedback = useCallback(
     async ({
@@ -198,8 +236,29 @@ export function useQuizState(): QuizViewModel {
       userAnswer,
       completeAnswer,
     }: OpenFeedbackRequest) => {
+      if (!accessToken) {
+        updateQuestionStateAtIndex(questionIndex, (currentState) => {
+          if (
+            currentState.feedback.status !== 'loading'
+            || currentState.open.submittedAnswer !== userAnswer
+          ) {
+            return currentState
+          }
+
+          return {
+            ...currentState,
+            feedback: {
+              status: 'error',
+              message: QUIZ_AUTH_ERROR_MESSAGE,
+            },
+          }
+        })
+        return
+      }
+
       try {
         const feedback = await fetchFeedback({
+          accessToken,
           question,
           userAnswer,
           completeAnswer,
@@ -225,10 +284,15 @@ export function useQuizState(): QuizViewModel {
             },
           }
         })
-      } catch {
+      } catch (error) {
         if (quizSessionIdRef.current !== quizSessionId) {
           return
         }
+
+        const feedbackErrorMessage =
+          error instanceof QuizApiError && error.statusCode === 401
+            ? QUIZ_AUTH_ERROR_MESSAGE
+            : QUIZ_FEEDBACK_ERROR_MESSAGE
 
         updateQuestionStateAtIndex(questionIndex, (currentState) => {
           if (
@@ -242,13 +306,13 @@ export function useQuizState(): QuizViewModel {
             ...currentState,
             feedback: {
               status: 'error',
-              message: QUIZ_FEEDBACK_ERROR_MESSAGE,
+              message: feedbackErrorMessage,
             },
           }
         })
       }
     },
-    [updateQuestionStateAtIndex],
+    [accessToken, updateQuestionStateAtIndex],
   )
 
   const setMode = useCallback((mode: QuizMode) => {

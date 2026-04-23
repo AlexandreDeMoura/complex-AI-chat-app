@@ -1,17 +1,20 @@
-import { type ChangeEvent, useCallback } from 'react'
+import { type ChangeEvent, useCallback, useState } from 'react'
 import {
   ArrowLeft,
   CheckCircle2,
   Circle,
   FileQuestion,
   Loader2,
+  LogOut,
   MessageCircle,
   Upload,
   XCircle,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useAuth } from '@/features/auth/view-model'
 import { QUIZ_UPLOAD_MAX_SIZE_BYTES } from '@/features/quiz/data'
 import type {
   QuizFeedbackStatus,
@@ -27,6 +30,10 @@ import { QuizChatModal } from '@/features/quiz/view/quiz-chat-modal'
 const QUIZ_MAX_FILE_SIZE_MB = Math.round(QUIZ_UPLOAD_MAX_SIZE_BYTES / (1024 * 1024))
 
 export function QuizPage() {
+  const navigate = useNavigate()
+  const { accessToken, signOut } = useAuth()
+  const [isSigningOut, setIsSigningOut] = useState(false)
+
   const {
     screen,
     mode,
@@ -65,7 +72,20 @@ export function QuizPage() {
     returnToUpload,
     openQuizChatHandoff,
     closeQuizChatHandoff,
-  } = useQuizState()
+  } = useQuizState({ accessToken })
+
+  const handleSignOut = useCallback(async () => {
+    setIsSigningOut(true)
+
+    try {
+      await signOut()
+      navigate('/login', { replace: true })
+    } catch {
+      toast.error('Unable to sign out right now. Please try again.')
+    } finally {
+      setIsSigningOut(false)
+    }
+  }, [navigate, signOut])
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
@@ -78,12 +98,30 @@ export function QuizPage() {
             <span className="text-base font-semibold tracking-tight">Quiz</span>
           </div>
 
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/" className="gap-2">
-              <ArrowLeft className="size-4" />
-              Back to chat
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/" className="gap-2">
+                <ArrowLeft className="size-4" />
+                Back to chat
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isSigningOut}
+              onClick={() => {
+                void handleSignOut()
+              }}
+              className="gap-2"
+            >
+              {isSigningOut ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <LogOut className="size-4" />
+              )}
+              Sign out
+            </Button>
+          </div>
         </div>
       </header>
 
