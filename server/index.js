@@ -4,14 +4,20 @@ import express from 'express'
 import { z } from 'zod'
 import { sendMessage, streamMessage, resumeStream } from './application/chat-service.js'
 import {
+  addQuizQuestionsToCollection,
+  deleteQuizQuestion,
   QuizBulkPersistenceError,
   QuizCollectionError,
   QuizFeedbackError,
   createQuizCollection,
   deleteQuizCollection,
   generateQuizFeedback,
+  listQuizCollectionQuestions,
   listQuizCollections,
   persistQuizQuestionsBulk,
+  removeQuizQuestionFromCollection,
+  searchQuizQuestions,
+  updateQuizQuestion,
   updateQuizCollection,
 } from './application/quiz-service.js'
 import { listThreads } from './application/thread-service.js'
@@ -80,9 +86,15 @@ const quizQuestionSchema = z
     }
   })
 
+const collectionNameOverridesSchema = z.record(
+  z.string().trim().min(1, 'collection_name_overrides values must be non-empty strings.'),
+)
+
 const quizBulkQuestionsSchema = z
   .object({
     questions: z.array(quizQuestionSchema).min(1, 'At least one quiz question is required.'),
+    collection_name_overrides: collectionNameOverridesSchema.optional(),
+    merge_into_collection_id: z.string().trim().min(1, 'merge_into_collection_id is required.').optional(),
   })
   .strict()
 
@@ -122,6 +134,31 @@ const collectionDeleteQuerySchema = z
 const collectionIdParamSchema = z.object({
   id: z.string().trim().min(1, 'Collection id is required.'),
 })
+
+const collectionQuestionIdParamSchema = z.object({
+  id: z.string().trim().min(1, 'Collection id is required.'),
+  question_id: z.string().trim().min(1, 'Question id is required.'),
+})
+
+const questionIdParamSchema = z.object({
+  id: z.string().trim().min(1, 'Question id is required.'),
+})
+
+const collectionQuestionLinkSchema = z
+  .object({
+    question_ids: z.array(z.string().trim().min(1, 'question_ids entries are required.')).min(
+      1,
+      'At least one question_id is required.',
+    ),
+  })
+  .strict()
+
+const questionSearchQuerySchema = z
+  .object({
+    search: z.string().optional(),
+    exclude_collection: z.string().trim().min(1).optional(),
+  })
+  .strict()
 
 app.use(cors())
 app.use(express.json())
@@ -246,6 +283,8 @@ quizRouter.post('/questions/bulk', async (req, res) => {
       accessToken,
       userId,
       questions: payload.data.questions,
+      collectionNameOverrides: payload.data.collection_name_overrides,
+      mergeIntoCollectionId: payload.data.merge_into_collection_id,
     })
 
     res.status(201).json(result)
@@ -355,6 +394,149 @@ quizRouter.delete('/collections/:id', async (req, res) => {
     res.json(result)
   } catch (error) {
     sendQuizCollectionError(res, error, 'quiz.collections.delete')
+  }
+})
+
+quizRouter.get('/collections/:id/questions', async (req, res) => {
+  const params = collectionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid collection id.')
+    return
+  }
+
+  try {
+    const result = await listQuizCollectionQuestions({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      collectionId: params.data.id,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.questions.list')
+  }
+})
+
+quizRouter.post('/collections/:id/questions', async (req, res) => {
+  const params = collectionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid collection id.')
+    return
+  }
+
+  const payload = collectionQuestionLinkSchema.safeParse(req.body)
+  if (!payload.success) {
+    sendValidationError(res, payload.error, 'Invalid collection question payload.')
+    return
+  }
+
+  try {
+    const result = await addQuizQuestionsToCollection({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      collectionId: params.data.id,
+      questionIds: payload.data.question_ids,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.questions.add')
+  }
+})
+
+quizRouter.delete('/collections/:id/questions/:question_id', async (req, res) => {
+  const params = collectionQuestionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid collection/question id.')
+    return
+  }
+
+  const query = collectionDeleteQuerySchema.safeParse(req.query)
+  if (!query.success) {
+    sendValidationError(res, query.error, 'Invalid collection question delete query.')
+    return
+  }
+
+  try {
+    const result = await removeQuizQuestionFromCollection({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      collectionId: params.data.id,
+      questionId: params.data.question_id,
+      orphanStrategy: query.data.orphan_strategy,
+      targetCollectionId: query.data.target,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.collections.questions.remove')
+  }
+})
+
+quizRouter.get('/questions', async (req, res) => {
+  const query = questionSearchQuerySchema.safeParse(req.query)
+  if (!query.success) {
+    sendValidationError(res, query.error, 'Invalid question search query.')
+    return
+  }
+
+  try {
+    const result = await searchQuizQuestions({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      search: query.data.search,
+      excludeCollectionId: query.data.exclude_collection,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.questions.search')
+  }
+})
+
+quizRouter.patch('/questions/:id', async (req, res) => {
+  const params = questionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid question id.')
+    return
+  }
+
+  const payload = quizQuestionSchema.safeParse(req.body)
+  if (!payload.success) {
+    sendValidationError(res, payload.error, 'Invalid quiz question payload.')
+    return
+  }
+
+  try {
+    const result = await updateQuizQuestion({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      questionId: params.data.id,
+      question: payload.data.question,
+      mcqQuestion: payload.data.mcq_question,
+      completeAnswer: payload.data.complete_answer,
+      mcqOptions: payload.data.mcq_options,
+      subject: payload.data.subject,
+      difficulty: payload.data.difficulty,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.questions.update')
+  }
+})
+
+quizRouter.delete('/questions/:id', async (req, res) => {
+  const params = questionIdParamSchema.safeParse(req.params)
+  if (!params.success) {
+    sendValidationError(res, params.error, 'Invalid question id.')
+    return
+  }
+
+  try {
+    const result = await deleteQuizQuestion({
+      accessToken: req.accessToken,
+      userId: req.userId,
+      questionId: params.data.id,
+    })
+    res.json(result)
+  } catch (error) {
+    sendQuizCollectionError(res, error, 'quiz.questions.delete')
   }
 })
 

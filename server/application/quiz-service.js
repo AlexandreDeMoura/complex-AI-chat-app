@@ -2,11 +2,17 @@ import { ChatAnthropic } from '@langchain/anthropic'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { extractMessageText } from '../domain/message-utils.js'
 import {
+  addQuestionsToCollection,
   createCollection,
+  deleteQuestion,
   deleteCollectionWithOrphanStrategy,
+  listCollectionQuestions,
   listCollectionsWithCounts,
   persistBulkQuestions,
   QuizQuestionRepositoryError,
+  removeQuestionFromCollection,
+  searchQuestions,
+  updateQuestion,
   updateCollection,
 } from '../infrastructure/question-repository.js'
 
@@ -215,6 +221,116 @@ export const deleteQuizCollection = async ({
     return result
   } catch (error) {
     throw toQuizCollectionError(error, 'Quiz collection deletion failed.')
+  }
+}
+
+export const listQuizCollectionQuestions = async ({ accessToken, userId, collectionId }) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const questions = await listCollectionQuestions({ accessToken, collectionId })
+    return { questions }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz collection question listing failed.')
+  }
+}
+
+export const addQuizQuestionsToCollection = async ({
+  accessToken,
+  userId,
+  collectionId,
+  questionIds,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    return await addQuestionsToCollection({ accessToken, collectionId, questionIds })
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Adding questions to quiz collection failed.')
+  }
+}
+
+export const removeQuizQuestionFromCollection = async ({
+  accessToken,
+  userId,
+  collectionId,
+  questionId,
+  orphanStrategy,
+  targetCollectionId,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    return await removeQuestionFromCollection({
+      accessToken,
+      collectionId,
+      questionId,
+      orphanStrategy,
+      targetCollectionId,
+    })
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Removing question from quiz collection failed.')
+  }
+}
+
+export const searchQuizQuestions = async ({
+  accessToken,
+  userId,
+  search,
+  excludeCollectionId,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const questions = await searchQuestions({
+      accessToken,
+      search,
+      excludeCollectionId,
+    })
+    return { questions }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz question search failed.')
+  }
+}
+
+export const updateQuizQuestion = async ({
+  accessToken,
+  userId,
+  questionId,
+  question,
+  mcqQuestion,
+  completeAnswer,
+  mcqOptions,
+  subject,
+  difficulty,
+}) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    const updatedQuestion = await updateQuestion({
+      accessToken,
+      questionId,
+      question,
+      mcqQuestion,
+      completeAnswer,
+      mcqOptions,
+      subject,
+      difficulty,
+    })
+
+    return { question: updatedQuestion }
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz question update failed.')
+  }
+}
+
+export const deleteQuizQuestion = async ({ accessToken, userId, questionId }) => {
+  assertQuizCollectionAuth({ accessToken, userId })
+
+  try {
+    return await deleteQuestion({ accessToken, questionId })
+  } catch (error) {
+    throw toQuizCollectionError(error, 'Quiz question deletion failed.')
   }
 }
 
