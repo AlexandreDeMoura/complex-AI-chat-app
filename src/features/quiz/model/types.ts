@@ -1,6 +1,9 @@
+import type { QuizOption } from '@/features/quiz/model/schema'
+
 export type QuizScreen = 'upload' | 'question'
 export type QuizMode = 'open' | 'mcq'
 export type QuizFeedbackStatus = 'idle' | 'loading' | 'success' | 'error'
+export type OrphanStrategy = 'delete' | 'reassign'
 
 export interface QuizUploadError {
   title: string
@@ -37,4 +40,32 @@ export interface QuizCollectionSummary {
   questionCount: number
   createdAt: string
   updatedAt: string
+}
+
+export interface QuizCollectionQuestion {
+  id: string
+  question: string
+  mcqQuestion: string
+  completeAnswer: string
+  mcqOptions: QuizOption[]
+  subject: string
+  difficulty: number
+  masteryLevel: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QuizCollectionDeleteResult {
+  id: string
+  orphanQuestionIds: string[]
+  deletedQuestionIds: string[]
+  reassignedQuestionIds: string[]
+}
+
+export interface QuizCollectionQuestionRemovalResult {
+  collectionId: string
+  questionId: string
+  orphanQuestionIds: string[]
+  deletedQuestionIds: string[]
+  reassignedQuestionIds: string[]
 }

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Thread } from '@/components/thread'
 import { LoginPage, ProtectedRoute, PublicOnlyRoute } from '@/features/auth/view'
+import { CollectionDetailPage } from '@/features/quiz/view/collection-detail-page'
 import { CollectionsListPage } from '@/features/quiz/view/collections-list-page'
 import { QuizPage } from '@/features/quiz/view/quiz-page'
 
@@ -14,6 +15,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/quiz" element={<QuizPage />} />
         <Route path="/quiz/collections" element={<CollectionsListPage />} />
+        <Route path="/quiz/collections/:id" element={<CollectionDetailPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

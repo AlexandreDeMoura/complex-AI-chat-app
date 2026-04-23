@@ -235,16 +235,21 @@ interface CollectionCardProps {
 
 function CollectionCard({ collection }: CollectionCardProps) {
   return (
-    <article className="rounded-xl border border-border bg-background p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-semibold leading-5">{collection.name}</h3>
-        <span className="rounded-full bg-[#2F6868]/10 px-2 py-1 text-xs font-medium text-[#2F6868]">
-          {collection.questionCount} question{collection.questionCount === 1 ? '' : 's'}
-        </span>
-      </div>
-      <p className="text-muted-foreground mt-2 line-clamp-3 text-xs leading-5">
-        {collection.description || 'No description yet.'}
-      </p>
+    <article>
+      <Link
+        to={`/quiz/collections/${collection.id}`}
+        className="block rounded-xl border border-border bg-background p-4 transition-colors hover:bg-muted/25"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-sm font-semibold leading-5">{collection.name}</h3>
+          <span className="rounded-full bg-[#2F6868]/10 px-2 py-1 text-xs font-medium text-[#2F6868]">
+            {collection.questionCount} question{collection.questionCount === 1 ? '' : 's'}
+          </span>
+        </div>
+        <p className="text-muted-foreground mt-2 line-clamp-3 text-xs leading-5">
+          {collection.description || 'No description yet.'}
+        </p>
+      </Link>
     </article>
   )
 }

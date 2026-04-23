@@ -1,4 +1,11 @@
-import type { QuizCollectionSummary } from '@/features/quiz/model'
+import type {
+  OrphanStrategy,
+  QuizCollectionDeleteResult,
+  QuizCollectionQuestion,
+  QuizCollectionQuestionRemovalResult,
+  QuizCollectionSummary,
+  QuizOption,
+} from '@/features/quiz/model'
 import {
   QuizApiError,
   createAuthorizedJsonHeaders,
@@ -9,8 +16,12 @@ interface ListCollectionsApiResponse {
   collections?: unknown
 }
 
-interface CreateCollectionApiResponse {
+interface CollectionApiResponse {
   collection?: unknown
+}
+
+interface ListCollectionQuestionsApiResponse {
+  questions?: unknown
 }
 
 interface CreateQuizCollectionParams {
@@ -19,29 +30,71 @@ interface CreateQuizCollectionParams {
   description?: string | null
 }
 
+interface UpdateQuizCollectionParams {
+  accessToken: string
+  collectionId: string
+  name?: string
+  description?: string | null
+}
+
+interface DeleteQuizCollectionParams {
+  accessToken: string
+  collectionId: string
+  orphanStrategy?: OrphanStrategy
+  targetCollectionId?: string
+}
+
+interface RemoveQuestionFromCollectionParams {
+  accessToken: string
+  collectionId: string
+  questionId: string
+  orphanStrategy?: OrphanStrategy
+  targetCollectionId?: string
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function normalizeCollectionPayload(value: unknown): QuizCollectionSummary {
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+  }
+
+  return value === null ? null : null
+}
+
+interface NormalizeCollectionOptions {
+  requireQuestionCount: boolean
+  fallbackQuestionCount?: number
+}
+
+function normalizeCollectionPayload(
+  value: unknown,
+  { requireQuestionCount, fallbackQuestionCount = 0 }: NormalizeCollectionOptions,
+): QuizCollectionSummary {
   if (!isRecord(value)) {
     throw new QuizApiError('Collection response payload is invalid.', 502)
   }
 
   const id = typeof value.id === 'string' ? value.id.trim() : ''
   const name = typeof value.name === 'string' ? value.name.trim() : ''
-  const description = typeof value.description === 'string'
-    ? value.description.trim()
-    : value.description === null
-      ? null
-      : null
+  const description = normalizeOptionalString(value.description)
   const createdAt = typeof value.createdAt === 'string' ? value.createdAt.trim() : ''
   const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt.trim() : ''
-  const questionCount = typeof value.questionCount === 'number' && Number.isInteger(value.questionCount)
-    ? value.questionCount
-    : NaN
 
-  if (!id || !name || !createdAt || !updatedAt || Number.isNaN(questionCount) || questionCount < 0) {
+  const rawQuestionCount = value.questionCount
+  const hasNumericQuestionCount =
+    typeof rawQuestionCount === 'number' && Number.isInteger(rawQuestionCount) && rawQuestionCount >= 0
+
+  const questionCount = hasNumericQuestionCount
+    ? rawQuestionCount
+    : requireQuestionCount
+      ? NaN
+      : fallbackQuestionCount
+
+  if (!id || !name || !createdAt || !updatedAt || Number.isNaN(questionCount)) {
     throw new QuizApiError('Collection response payload is missing expected fields.', 502)
   }
 
@@ -53,6 +106,172 @@ function normalizeCollectionPayload(value: unknown): QuizCollectionSummary {
     createdAt,
     updatedAt,
   }
+}
+
+function normalizeQuizOptionPayload(value: unknown): QuizOption {
+  if (!isRecord(value)) {
+    throw new QuizApiError('Question options payload is invalid.', 502)
+  }
+
+  const option = typeof value.option === 'string' ? value.option.trim() : ''
+  const isCorrect = value.is_correct
+
+  if (!option || typeof isCorrect !== 'boolean') {
+    throw new QuizApiError('Question options payload is missing expected fields.', 502)
+  }
+
+  return {
+    option,
+    is_correct: isCorrect,
+  }
+}
+
+function normalizeQuestionPayload(value: unknown): QuizCollectionQuestion {
+  if (!isRecord(value)) {
+    throw new QuizApiError('Question response payload is invalid.', 502)
+  }
+
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  const question = typeof value.question === 'string' ? value.question.trim() : ''
+  const mcqQuestion = typeof value.mcqQuestion === 'string' ? value.mcqQuestion.trim() : ''
+  const completeAnswer = typeof value.completeAnswer === 'string' ? value.completeAnswer.trim() : ''
+  const subject = typeof value.subject === 'string' ? value.subject.trim() : ''
+  const createdAt = typeof value.createdAt === 'string' ? value.createdAt.trim() : ''
+  const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt.trim() : ''
+
+  const difficulty =
+    typeof value.difficulty === 'number' && Number.isInteger(value.difficulty)
+      ? value.difficulty
+      : NaN
+
+  const masteryLevel =
+    typeof value.masteryLevel === 'number' && Number.isInteger(value.masteryLevel)
+      ? value.masteryLevel
+      : NaN
+
+  const mcqOptions = Array.isArray(value.mcqOptions)
+    ? value.mcqOptions.map((option) => normalizeQuizOptionPayload(option))
+    : null
+
+  if (
+    !id
+    || !question
+    || !mcqQuestion
+    || !completeAnswer
+    || !subject
+    || !createdAt
+    || !updatedAt
+    || Number.isNaN(difficulty)
+    || Number.isNaN(masteryLevel)
+    || mcqOptions === null
+    || mcqOptions.length !== 4
+  ) {
+    throw new QuizApiError('Question response payload is missing expected fields.', 502)
+  }
+
+  return {
+    id,
+    question,
+    mcqQuestion,
+    completeAnswer,
+    mcqOptions,
+    subject,
+    difficulty,
+    masteryLevel,
+    createdAt,
+    updatedAt,
+  }
+}
+
+function normalizeMutationQuestionIds(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new QuizApiError(`Mutation response field "${field}" is invalid.`, 502)
+  }
+
+  const ids = value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => item.length > 0)
+
+  return Array.from(new Set(ids))
+}
+
+function normalizeCollectionDeletePayload(value: unknown): QuizCollectionDeleteResult {
+  if (!isRecord(value)) {
+    throw new QuizApiError('Delete collection response payload is invalid.', 502)
+  }
+
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  if (!id) {
+    throw new QuizApiError('Delete collection response payload is missing expected fields.', 502)
+  }
+
+  return {
+    id,
+    orphanQuestionIds: normalizeMutationQuestionIds(value.orphanQuestionIds ?? [], 'orphanQuestionIds'),
+    deletedQuestionIds: normalizeMutationQuestionIds(value.deletedQuestionIds ?? [], 'deletedQuestionIds'),
+    reassignedQuestionIds: normalizeMutationQuestionIds(value.reassignedQuestionIds ?? [], 'reassignedQuestionIds'),
+  }
+}
+
+function normalizeQuestionRemovalPayload(value: unknown): QuizCollectionQuestionRemovalResult {
+  if (!isRecord(value)) {
+    throw new QuizApiError('Remove question response payload is invalid.', 502)
+  }
+
+  const collectionId = typeof value.collectionId === 'string' ? value.collectionId.trim() : ''
+  const questionId = typeof value.questionId === 'string' ? value.questionId.trim() : ''
+
+  if (!collectionId || !questionId) {
+    throw new QuizApiError('Remove question response payload is missing expected fields.', 502)
+  }
+
+  return {
+    collectionId,
+    questionId,
+    orphanQuestionIds: normalizeMutationQuestionIds(value.orphanQuestionIds ?? [], 'orphanQuestionIds'),
+    deletedQuestionIds: normalizeMutationQuestionIds(value.deletedQuestionIds ?? [], 'deletedQuestionIds'),
+    reassignedQuestionIds: normalizeMutationQuestionIds(value.reassignedQuestionIds ?? [], 'reassignedQuestionIds'),
+  }
+}
+
+function buildOrphanStrategyQuery({
+  orphanStrategy,
+  targetCollectionId,
+}: {
+  orphanStrategy?: OrphanStrategy
+  targetCollectionId?: string
+}): string {
+  const params = new URLSearchParams()
+
+  if (orphanStrategy) {
+    params.set('orphan_strategy', orphanStrategy)
+  }
+
+  if (orphanStrategy === 'reassign') {
+    const targetId = typeof targetCollectionId === 'string' ? targetCollectionId.trim() : ''
+    if (!targetId) {
+      throw new QuizApiError('Target collection is required when using reassign strategy.', 400)
+    }
+    params.set('target', targetId)
+  }
+
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
+export function extractOrphanQuestionIdsFromDetails(details: unknown): string[] {
+  if (!isRecord(details)) {
+    return []
+  }
+
+  const raw = details.orphanQuestionIds ?? details.orphan_question_ids
+  if (!Array.isArray(raw)) {
+    return []
+  }
+
+  return raw
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => item.length > 0)
 }
 
 export async function listQuizCollections(accessToken: string): Promise<QuizCollectionSummary[]> {
@@ -76,7 +295,8 @@ export async function listQuizCollections(accessToken: string): Promise<QuizColl
     throw new QuizApiError('Collections response is missing the collection list.', 502)
   }
 
-  return payload.collections.map((collection) => normalizeCollectionPayload(collection))
+  return payload.collections.map((collection) =>
+    normalizeCollectionPayload(collection, { requireQuestionCount: true }))
 }
 
 export async function createQuizCollection({
@@ -106,12 +326,172 @@ export async function createQuizCollection({
     throw await parseQuizApiError(response, 'Failed to create quiz collection.')
   }
 
-  let payload: CreateCollectionApiResponse
+  let payload: CollectionApiResponse
   try {
-    payload = (await response.json()) as CreateCollectionApiResponse
+    payload = (await response.json()) as CollectionApiResponse
   } catch {
     throw new QuizApiError('Create collection response is not valid JSON.', 502)
   }
 
-  return normalizeCollectionPayload(payload.collection)
+  return normalizeCollectionPayload(payload.collection, { requireQuestionCount: true })
+}
+
+export async function listQuizCollectionQuestions({
+  accessToken,
+  collectionId,
+}: {
+  accessToken: string
+  collectionId: string
+}): Promise<QuizCollectionQuestion[]> {
+  const normalizedCollectionId = collectionId.trim()
+  if (!normalizedCollectionId) {
+    throw new QuizApiError('Collection id is required.', 400)
+  }
+
+  const response = await fetch(`/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}/questions`, {
+    method: 'GET',
+    headers: createAuthorizedJsonHeaders(accessToken),
+  })
+
+  if (!response.ok) {
+    throw await parseQuizApiError(response, 'Failed to load collection questions.')
+  }
+
+  let payload: ListCollectionQuestionsApiResponse
+  try {
+    payload = (await response.json()) as ListCollectionQuestionsApiResponse
+  } catch {
+    throw new QuizApiError('Collection questions response is not valid JSON.', 502)
+  }
+
+  if (!Array.isArray(payload.questions)) {
+    throw new QuizApiError('Collection questions response is missing the question list.', 502)
+  }
+
+  return payload.questions.map((question) => normalizeQuestionPayload(question))
+}
+
+export async function updateQuizCollection({
+  accessToken,
+  collectionId,
+  name,
+  description,
+}: UpdateQuizCollectionParams): Promise<QuizCollectionSummary> {
+  const normalizedCollectionId = collectionId.trim()
+  if (!normalizedCollectionId) {
+    throw new QuizApiError('Collection id is required.', 400)
+  }
+
+  const payload: Record<string, string | null> = {}
+
+  if (typeof name === 'string') {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      throw new QuizApiError('Collection name is required.', 400)
+    }
+
+    payload.name = trimmedName
+  }
+
+  if (description !== undefined) {
+    payload.description = typeof description === 'string' ? description.trim() || null : null
+  }
+
+  if (Object.keys(payload).length === 0) {
+    throw new QuizApiError('At least one collection field is required for update.', 400)
+  }
+
+  const response = await fetch(`/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}`, {
+    method: 'PATCH',
+    headers: createAuthorizedJsonHeaders(accessToken),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw await parseQuizApiError(response, 'Failed to update quiz collection.')
+  }
+
+  let body: CollectionApiResponse
+  try {
+    body = (await response.json()) as CollectionApiResponse
+  } catch {
+    throw new QuizApiError('Update collection response is not valid JSON.', 502)
+  }
+
+  return normalizeCollectionPayload(body.collection, {
+    requireQuestionCount: false,
+    fallbackQuestionCount: 0,
+  })
+}
+
+export async function deleteQuizCollection({
+  accessToken,
+  collectionId,
+  orphanStrategy,
+  targetCollectionId,
+}: DeleteQuizCollectionParams): Promise<QuizCollectionDeleteResult> {
+  const normalizedCollectionId = collectionId.trim()
+  if (!normalizedCollectionId) {
+    throw new QuizApiError('Collection id is required.', 400)
+  }
+
+  const query = buildOrphanStrategyQuery({ orphanStrategy, targetCollectionId })
+  const response = await fetch(`/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}${query}`, {
+    method: 'DELETE',
+    headers: createAuthorizedJsonHeaders(accessToken),
+  })
+
+  if (!response.ok) {
+    throw await parseQuizApiError(response, 'Failed to delete quiz collection.')
+  }
+
+  let payload: unknown
+  try {
+    payload = (await response.json()) as unknown
+  } catch {
+    throw new QuizApiError('Delete collection response is not valid JSON.', 502)
+  }
+
+  return normalizeCollectionDeletePayload(payload)
+}
+
+export async function removeQuizQuestionFromCollection({
+  accessToken,
+  collectionId,
+  questionId,
+  orphanStrategy,
+  targetCollectionId,
+}: RemoveQuestionFromCollectionParams): Promise<QuizCollectionQuestionRemovalResult> {
+  const normalizedCollectionId = collectionId.trim()
+  const normalizedQuestionId = questionId.trim()
+
+  if (!normalizedCollectionId) {
+    throw new QuizApiError('Collection id is required.', 400)
+  }
+
+  if (!normalizedQuestionId) {
+    throw new QuizApiError('Question id is required.', 400)
+  }
+
+  const query = buildOrphanStrategyQuery({ orphanStrategy, targetCollectionId })
+  const response = await fetch(
+    `/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}/questions/${encodeURIComponent(normalizedQuestionId)}${query}`,
+    {
+      method: 'DELETE',
+      headers: createAuthorizedJsonHeaders(accessToken),
+    },
+  )
+
+  if (!response.ok) {
+    throw await parseQuizApiError(response, 'Failed to remove question from collection.')
+  }
+
+  let payload: unknown
+  try {
+    payload = (await response.json()) as unknown
+  } catch {
+    throw new QuizApiError('Remove question response is not valid JSON.', 502)
+  }
+
+  return normalizeQuestionRemovalPayload(payload)
 }
