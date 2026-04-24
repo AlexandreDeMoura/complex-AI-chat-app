@@ -101,6 +101,28 @@ function mapCollectionQuestionToSessionQuestion(question: QuizCollectionQuestion
   }
 }
 
+// Shuffle MCQ options once per quiz session so the correct answer isn't always in the same slot,
+// but remains stable as the user navigates back and forth between questions within the session.
+function shuffleSessionQuestionMcqOptions(questions: QuizSessionQuestion[]): QuizSessionQuestion[] {
+  return questions.map((question) => {
+    const options = question.mcq_options
+    if (options.length <= 1) {
+      return question
+    }
+
+    const shuffledOptions = [...options]
+    for (let i = shuffledOptions.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffledOptions[i], shuffledOptions[j]] = [shuffledOptions[j], shuffledOptions[i]]
+    }
+
+    return {
+      ...question,
+      mcq_options: shuffledOptions,
+    }
+  })
+}
+
 interface OpenFeedbackRequest {
   questionIndex: number
   quizSessionId: number
@@ -305,8 +327,9 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
   )
 
   const startQuizSession = useCallback((nextQuestions: QuizSessionQuestion[]) => {
-    setQuestions(nextQuestions)
-    setQuestionStates(nextQuestions.map(() => createInitialQuestionState()))
+    const shuffledQuestions = shuffleSessionQuestionMcqOptions(nextQuestions)
+    setQuestions(shuffledQuestions)
+    setQuestionStates(shuffledQuestions.map(() => createInitialQuestionState()))
     setCurrentQuestionIndex(0)
     setSelectedSubject(null)
     setReviewQuestions([])
