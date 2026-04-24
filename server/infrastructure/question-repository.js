@@ -193,6 +193,50 @@ const normalizeNullableGrade = (value, { field }) => {
   return normalizeGradeValue(value, { field })
 }
 
+const normalizeIntegerFilterList = (value, { field, min, max }) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  const rangeLabel =
+    min !== undefined && max !== undefined ? ` between ${min} and ${max}` : ''
+
+  if (!Array.isArray(value)) {
+    throw new QuizQuestionRepositoryError(`"${field}" must be an array of integers${rangeLabel}.`, {
+      statusCode: 400,
+    })
+  }
+
+  const normalized = []
+  const seen = new Set()
+
+  for (const item of value) {
+    if (!Number.isInteger(item)) {
+      throw new QuizQuestionRepositoryError(`"${field}" must contain integers${rangeLabel}.`, {
+        statusCode: 400,
+      })
+    }
+
+    const isOutOfRange =
+      (min !== undefined && item < min) || (max !== undefined && item > max)
+
+    if (isOutOfRange) {
+      throw new QuizQuestionRepositoryError(`"${field}" must contain integers${rangeLabel}.`, {
+        statusCode: 400,
+      })
+    }
+
+    if (seen.has(item)) {
+      continue
+    }
+
+    seen.add(item)
+    normalized.push(item)
+  }
+
+  return normalized.length > 0 ? normalized : null
+}
+
 const normalizeOrphanStrategy = (value) => {
   if (value === null || value === undefined) {
     return null
@@ -946,17 +990,38 @@ export const deleteCollectionWithOrphanStrategy = async ({
   }
 }
 
-export const listCollectionQuestions = async ({ accessToken, collectionId }) => {
+export const listCollectionQuestions = async ({
+  accessToken,
+  collectionId,
+  masteryLevels,
+  difficultyLevels,
+}) => {
+  const normalizedMasteryLevels = normalizeIntegerFilterList(masteryLevels, {
+    field: 'masteryLevels',
+    min: 0,
+    max: 5,
+  })
+  const normalizedDifficultyLevels = normalizeIntegerFilterList(difficultyLevels, {
+    field: 'difficultyLevels',
+    min: -32768,
+    max: 32767,
+  })
+
   const supabase = createSupabaseRequestClient(accessToken)
   await assertCollectionExists({ supabase, collectionId })
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('questions')
     .select(
       'id, question, mcq_question, complete_answer, mcq_options, subject, difficulty, created_at, updated_at, mastery_cache(mastery_level), collection_questions!inner(collection_id)',
     )
     .eq('collection_questions.collection_id', collectionId)
-    .order('created_at', { ascending: true })
+
+  if (normalizedDifficultyLevels) {
+    query = query.in('difficulty', normalizedDifficultyLevels)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: true })
 
   if (error) {
     throwFromSupabaseError(error, {
@@ -964,7 +1029,13 @@ export const listCollectionQuestions = async ({ accessToken, collectionId }) => 
     })
   }
 
-  return (data ?? []).map(mapQuestionRow)
+  const questions = (data ?? []).map(mapQuestionRow)
+  if (!normalizedMasteryLevels) {
+    return questions
+  }
+
+  const allowedMasteryLevels = new Set(normalizedMasteryLevels)
+  return questions.filter((question) => allowedMasteryLevels.has(question.masteryLevel))
 }
 
 export const searchQuestions = async ({ accessToken, search, excludeCollectionId, limit }) => {

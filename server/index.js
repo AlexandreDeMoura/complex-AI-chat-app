@@ -98,6 +98,57 @@ const quizQuestionSchema = z
     }
   })
 
+const createIntegerCsvQueryParamSchema = ({ field, min, max }) =>
+  z.string().transform((value, ctx) => {
+    const validationMessage =
+      min !== undefined && max !== undefined
+        ? `${field} must be a comma-separated list of integers between ${min} and ${max}.`
+        : `${field} must be a comma-separated list of integers.`
+
+    const segments = value.split(',').map((segment) => segment.trim())
+    if (segments.length === 0 || segments.some((segment) => segment.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: validationMessage,
+      })
+      return z.NEVER
+    }
+
+    const normalized = []
+    const seen = new Set()
+
+    for (const segment of segments) {
+      if (!/^-?\d+$/.test(segment)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: validationMessage,
+        })
+        return z.NEVER
+      }
+
+      const parsed = Number.parseInt(segment, 10)
+      const isOutOfRange =
+        (min !== undefined && parsed < min) || (max !== undefined && parsed > max)
+
+      if (!Number.isSafeInteger(parsed) || isOutOfRange) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: validationMessage,
+        })
+        return z.NEVER
+      }
+
+      if (seen.has(parsed)) {
+        continue
+      }
+
+      seen.add(parsed)
+      normalized.push(parsed)
+    }
+
+    return normalized
+  })
+
 const collectionNameOverridesSchema = z.record(
   z.string().trim().min(1, 'collection_name_overrides values must be non-empty strings.'),
 )
@@ -169,6 +220,17 @@ const questionSearchQuerySchema = z
   .object({
     search: z.string().optional(),
     exclude_collection: z.string().trim().min(1).optional(),
+  })
+  .strict()
+
+const collectionQuestionsQuerySchema = z
+  .object({
+    mastery: createIntegerCsvQueryParamSchema({ field: 'mastery', min: 0, max: 5 }).optional(),
+    difficulty: createIntegerCsvQueryParamSchema({
+      field: 'difficulty',
+      min: -32768,
+      max: 32767,
+    }).optional(),
   })
   .strict()
 
@@ -469,11 +531,19 @@ quizRouter.get('/collections/:id/questions', async (req, res) => {
     return
   }
 
+  const query = collectionQuestionsQuerySchema.safeParse(req.query)
+  if (!query.success) {
+    sendValidationError(res, query.error, 'Invalid collection question query.')
+    return
+  }
+
   try {
     const result = await listQuizCollectionQuestions({
       accessToken: req.accessToken,
       userId: req.userId,
       collectionId: params.data.id,
+      masteryLevels: query.data.mastery,
+      difficultyLevels: query.data.difficulty,
     })
     res.json(result)
   } catch (error) {

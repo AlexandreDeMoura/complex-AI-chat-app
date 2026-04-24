@@ -435,11 +435,22 @@ export const deleteQuizCollection = async ({
   }
 }
 
-export const listQuizCollectionQuestions = async ({ accessToken, userId, collectionId }) => {
+export const listQuizCollectionQuestions = async ({
+  accessToken,
+  userId,
+  collectionId,
+  masteryLevels,
+  difficultyLevels,
+}) => {
   assertQuizCollectionAuth({ accessToken, userId })
 
   try {
-    const questions = await listCollectionQuestions({ accessToken, collectionId })
+    const questions = await listCollectionQuestions({
+      accessToken,
+      collectionId,
+      masteryLevels,
+      difficultyLevels,
+    })
     return { questions }
   } catch (error) {
     throw toQuizCollectionError(error, 'Quiz collection question listing failed.')
