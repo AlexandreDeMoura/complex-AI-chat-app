@@ -41,8 +41,13 @@ export function QuizPage() {
     screen,
     mode,
     isUploading,
+    isLoadingStartCollections,
+    isStartingFromCollection,
     isLoadingReviewCollections,
     uploadError,
+    startCollectionError,
+    startCollections,
+    selectedStartCollectionId,
     reviewCollections,
     reviewMergeMode,
     reviewExistingCollections,
@@ -81,6 +86,9 @@ export function QuizPage() {
     goToNextQuestion,
     setSubjectFilter,
     uploadQuizFile,
+    setSelectedStartCollectionId,
+    refreshStartCollections,
+    startQuizFromCollection,
     setReviewCollectionName,
     setReviewMergeMode,
     setReviewExistingCollectionId,
@@ -151,8 +159,16 @@ export function QuizPage() {
           {screen === 'upload' ? (
             <UploadShell
               isUploading={isUploading}
+              isLoadingStartCollections={isLoadingStartCollections}
+              isStartingFromCollection={isStartingFromCollection}
               uploadError={uploadError}
+              startCollectionError={startCollectionError}
+              startCollections={startCollections}
+              selectedStartCollectionId={selectedStartCollectionId}
               onUploadQuizFile={uploadQuizFile}
+              onSelectStartCollection={setSelectedStartCollectionId}
+              onRefreshStartCollections={refreshStartCollections}
+              onStartQuizFromCollection={startQuizFromCollection}
             />
           ) : screen === 'review' ? (
             <UploadReviewShell
@@ -212,8 +228,16 @@ export function QuizPage() {
           ) : (
             <UploadShell
               isUploading={isUploading}
+              isLoadingStartCollections={isLoadingStartCollections}
+              isStartingFromCollection={isStartingFromCollection}
               uploadError={uploadError}
+              startCollectionError={startCollectionError}
+              startCollections={startCollections}
+              selectedStartCollectionId={selectedStartCollectionId}
               onUploadQuizFile={uploadQuizFile}
+              onSelectStartCollection={setSelectedStartCollectionId}
+              onRefreshStartCollections={refreshStartCollections}
+              onStartQuizFromCollection={startQuizFromCollection}
             />
           )}
         </div>
@@ -231,11 +255,31 @@ export function QuizPage() {
 
 interface UploadShellProps {
   isUploading: boolean
+  isLoadingStartCollections: boolean
+  isStartingFromCollection: boolean
   uploadError: QuizUploadError | null
+  startCollectionError: string | null
+  startCollections: QuizCollectionSummary[]
+  selectedStartCollectionId: string | null
   onUploadQuizFile: (file: File | null) => Promise<void>
+  onSelectStartCollection: (collectionId: string | null) => void
+  onRefreshStartCollections: () => Promise<void>
+  onStartQuizFromCollection: () => Promise<void>
 }
 
-function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShellProps) {
+function UploadShell({
+  isUploading,
+  isLoadingStartCollections,
+  isStartingFromCollection,
+  uploadError,
+  startCollectionError,
+  startCollections,
+  selectedStartCollectionId,
+  onUploadQuizFile,
+  onSelectStartCollection,
+  onRefreshStartCollections,
+  onStartQuizFromCollection,
+}: UploadShellProps) {
   const handleFileInputChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const input = event.currentTarget
@@ -245,6 +289,15 @@ function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShell
     },
     [onUploadQuizFile],
   )
+
+  const selectedStartCollection = startCollections.find((collection) =>
+    collection.id === selectedStartCollectionId)
+  const isSelectedCollectionEmpty = selectedStartCollection?.questionCount === 0
+  const canStartFromCollection = Boolean(selectedStartCollectionId)
+    && !isSelectedCollectionEmpty
+    && !isUploading
+    && !isLoadingStartCollections
+    && !isStartingFromCollection
 
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
@@ -272,6 +325,74 @@ function UploadShell({ isUploading, uploadError, onUploadQuizFile }: UploadShell
             className="mt-4 w-full max-w-sm text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#2F6868] file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[#2F6868]/90 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-border bg-muted/15 p-4">
+        <p className="text-sm font-semibold">Start from an existing collection</p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Choose already saved questions and jump directly into a quiz session.
+        </p>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <select
+            value={selectedStartCollectionId ?? ''}
+            onChange={(event) => onSelectStartCollection(event.target.value || null)}
+            disabled={isLoadingStartCollections || isStartingFromCollection || startCollections.length === 0}
+            className="h-10 rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {startCollections.length === 0 ? (
+              <option value="">No collections available</option>
+            ) : (
+              startCollections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {collection.name} ({collection.questionCount} question
+                  {collection.questionCount === 1 ? '' : 's'})
+                </option>
+              ))
+            )}
+          </select>
+
+          <Button
+            variant="outline"
+            disabled={isLoadingStartCollections || isStartingFromCollection}
+            onClick={() => {
+              void onRefreshStartCollections()
+            }}
+          >
+            {isLoadingStartCollections ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Loading...
+              </>
+            ) : 'Refresh'}
+          </Button>
+
+          <Button
+            disabled={!canStartFromCollection}
+            onClick={() => {
+              void onStartQuizFromCollection()
+            }}
+          >
+            {isStartingFromCollection ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Starting...
+              </>
+            ) : 'Start quiz'}
+          </Button>
+        </div>
+
+        {isSelectedCollectionEmpty ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            This collection has no questions yet.
+          </p>
+        ) : null}
+
+        {startCollectionError ? (
+          <p className="mt-2 text-xs text-destructive" role="alert">
+            {startCollectionError}
+          </p>
+        ) : null}
       </div>
 
       {uploadError && <UploadErrorPanel error={uploadError} />}
