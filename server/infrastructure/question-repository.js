@@ -4,6 +4,7 @@ const BULK_INSERT_RPC_NAME = 'bulk_insert_quiz_questions'
 const DELETE_COLLECTION_WITH_ORPHAN_STRATEGY_RPC_NAME = 'delete_collection_with_orphan_strategy'
 const REMOVE_COLLECTION_QUESTION_WITH_ORPHAN_STRATEGY_RPC_NAME =
   'remove_collection_question_with_orphan_strategy'
+const UPSERT_MASTERY_CACHE_LEVEL_RPC_NAME = 'upsert_mastery_cache_level'
 
 const POSTGRES_UNIQUE_VIOLATION = '23505'
 const POSTGRES_FOREIGN_KEY_VIOLATION = '23503'
@@ -148,6 +149,48 @@ const normalizeRequiredText = (value, { field }) => {
   }
 
   return trimmed
+}
+
+const normalizeAnswerMode = (value) => {
+  if (value === 'open' || value === 'mcq') {
+    return value
+  }
+
+  throw new QuizQuestionRepositoryError('"mode" must be either "open" or "mcq".', {
+    statusCode: 400,
+  })
+}
+
+const normalizeNullableBoolean = (value, { field }) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value !== 'boolean') {
+    throw new QuizQuestionRepositoryError(`"${field}" must be a boolean.`, {
+      statusCode: 400,
+    })
+  }
+
+  return value
+}
+
+const normalizeGradeValue = (value, { field }) => {
+  if (!Number.isInteger(value) || value < 0 || value > 5) {
+    throw new QuizQuestionRepositoryError(`"${field}" must be an integer between 0 and 5.`, {
+      statusCode: 400,
+    })
+  }
+
+  return value
+}
+
+const normalizeNullableGrade = (value, { field }) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  return normalizeGradeValue(value, { field })
 }
 
 const normalizeOrphanStrategy = (value) => {
@@ -357,6 +400,24 @@ const assertCollectionExists = async ({ supabase, collectionId }) => {
   }
 }
 
+const assertQuestionExists = async ({ supabase, questionId }) => {
+  const { data, error } = await supabase.from('questions').select('id').eq('id', questionId).maybeSingle()
+
+  if (error) {
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to load quiz question.',
+      notFoundMessage: 'Question not found.',
+    })
+  }
+
+  if (!data?.id) {
+    throw new QuizQuestionRepositoryError('Question not found.', {
+      statusCode: 404,
+      details: { questionId },
+    })
+  }
+}
+
 const assertQuestionsExist = async ({ supabase, questionIds }) => {
   const normalizedQuestionIds = normalizeUuidList(questionIds)
   if (normalizedQuestionIds.length === 0) {
@@ -475,6 +536,243 @@ export const persistBulkQuestions = async ({
     questionIds,
     collectionIds,
   }
+}
+
+const buildAnswerHistoryPayload = ({
+  userId,
+  questionId,
+  mode,
+  userAnswer,
+  isCorrect,
+  grade,
+  aiFeedback,
+}) => {
+  const normalizedUserId = normalizeRequiredText(userId, { field: 'userId' })
+  const normalizedQuestionId = normalizeRequiredText(questionId, { field: 'questionId' })
+  const normalizedMode = normalizeAnswerMode(mode)
+  const normalizedUserAnswer = normalizeRequiredText(userAnswer, { field: 'userAnswer' })
+  const normalizedIsCorrect = normalizeNullableBoolean(isCorrect, { field: 'isCorrect' })
+  const normalizedGrade = normalizeNullableGrade(grade, { field: 'grade' })
+  const normalizedAiFeedback = normalizeOptionalText(aiFeedback)
+
+  if (normalizedMode === 'open') {
+    if (normalizedIsCorrect !== null) {
+      throw new QuizQuestionRepositoryError('"isCorrect" must be null for open attempts.', {
+        statusCode: 400,
+      })
+    }
+
+    return {
+      user_id: normalizedUserId,
+      question_id: normalizedQuestionId,
+      mode: normalizedMode,
+      user_answer: normalizedUserAnswer,
+      is_correct: null,
+      grade: normalizedGrade,
+      ai_feedback: normalizedAiFeedback ?? null,
+    }
+  }
+
+  if (normalizedGrade !== null) {
+    throw new QuizQuestionRepositoryError('"grade" must be null for MCQ attempts.', {
+      statusCode: 400,
+    })
+  }
+
+  if (normalizedIsCorrect === null) {
+    throw new QuizQuestionRepositoryError('"isCorrect" is required for MCQ attempts.', {
+      statusCode: 400,
+    })
+  }
+
+  if (normalizedAiFeedback !== null) {
+    throw new QuizQuestionRepositoryError('"aiFeedback" must be null for MCQ attempts.', {
+      statusCode: 400,
+    })
+  }
+
+  return {
+    user_id: normalizedUserId,
+    question_id: normalizedQuestionId,
+    mode: normalizedMode,
+    user_answer: normalizedUserAnswer,
+    is_correct: normalizedIsCorrect,
+    grade: null,
+    ai_feedback: null,
+  }
+}
+
+const extractMasteryLevelFromRpcResult = (data) => {
+  if (Number.isInteger(data)) {
+    return data
+  }
+
+  if (typeof data === 'string' && data.trim()) {
+    const parsed = Number.parseInt(data, 10)
+    if (Number.isInteger(parsed)) {
+      return parsed
+    }
+  }
+
+  if (Array.isArray(data) && data.length === 1) {
+    return extractMasteryLevelFromRpcResult(data[0])
+  }
+
+  if (data && typeof data === 'object') {
+    const masteryLevel = data.mastery_level
+    if (Number.isInteger(masteryLevel)) {
+      return masteryLevel
+    }
+
+    if (typeof masteryLevel === 'string' && masteryLevel.trim()) {
+      const parsed = Number.parseInt(masteryLevel, 10)
+      if (Number.isInteger(parsed)) {
+        return parsed
+      }
+    }
+  }
+
+  return null
+}
+
+export const insertAnswerHistoryAttempt = async ({
+  accessToken,
+  userId,
+  questionId,
+  mode,
+  userAnswer,
+  isCorrect,
+  grade,
+  aiFeedback,
+}) => {
+  const supabase = createSupabaseRequestClient(accessToken)
+  const payload = buildAnswerHistoryPayload({
+    userId,
+    questionId,
+    mode,
+    userAnswer,
+    isCorrect,
+    grade,
+    aiFeedback,
+  })
+
+  await assertQuestionExists({ supabase, questionId: payload.question_id })
+
+  const { error } = await supabase.from('answer_history').insert(payload)
+  if (error) {
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to persist quiz answer attempt.',
+      invalidMessage: 'Invalid quiz answer payload.',
+      foreignKeyMessage: 'Question not found.',
+      unauthorizedMessage: 'Quiz answer persistence requires authentication.',
+    })
+  }
+}
+
+export const listAnswerHistoryForQuestion = async ({ accessToken, userId, questionId }) => {
+  const normalizedUserId = normalizeRequiredText(userId, { field: 'userId' })
+  const normalizedQuestionId = normalizeRequiredText(questionId, { field: 'questionId' })
+  const supabase = createSupabaseRequestClient(accessToken)
+
+  const { data, error } = await supabase
+    .from('answer_history')
+    .select('mode, is_correct, grade')
+    .eq('user_id', normalizedUserId)
+    .eq('question_id', normalizedQuestionId)
+    .order('answered_at', { ascending: true })
+
+  if (error) {
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to load quiz answer history.',
+      unauthorizedMessage: 'Quiz answer history requires authentication.',
+    })
+  }
+
+  return (data ?? []).map((row) => ({
+    mode: row.mode,
+    is_correct: row.is_correct,
+    grade: Number.isInteger(row.grade) ? row.grade : null,
+  }))
+}
+
+export const getCachedMasteryLevelForQuestion = async ({ accessToken, userId, questionId }) => {
+  const normalizedUserId = normalizeRequiredText(userId, { field: 'userId' })
+  const normalizedQuestionId = normalizeRequiredText(questionId, { field: 'questionId' })
+  const supabase = createSupabaseRequestClient(accessToken)
+
+  const { data, error } = await supabase
+    .from('mastery_cache')
+    .select('mastery_level')
+    .eq('user_id', normalizedUserId)
+    .eq('question_id', normalizedQuestionId)
+    .maybeSingle()
+
+  if (error) {
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to load quiz mastery cache.',
+      unauthorizedMessage: 'Quiz mastery access requires authentication.',
+    })
+  }
+
+  return Number.isInteger(data?.mastery_level) ? data.mastery_level : 0
+}
+
+export const upsertMasteryLevelForQuestion = async ({
+  accessToken,
+  userId,
+  questionId,
+  masteryLevel,
+}) => {
+  const normalizedUserId = normalizeRequiredText(userId, { field: 'userId' })
+  const normalizedQuestionId = normalizeRequiredText(questionId, { field: 'questionId' })
+  const normalizedMasteryLevel = normalizeGradeValue(masteryLevel, { field: 'masteryLevel' })
+  const supabase = createSupabaseRequestClient(accessToken)
+
+  const { data, error } = await supabase.rpc(UPSERT_MASTERY_CACHE_LEVEL_RPC_NAME, {
+    p_question_id: normalizedQuestionId,
+    p_mastery_level: normalizedMasteryLevel,
+  })
+
+  if (error) {
+    if (error.code === PGRST_UNDEFINED_FUNCTION) {
+      throw new QuizQuestionRepositoryError(
+        'Mastery upsert RPC is not available. Run the latest Supabase migrations.',
+        {
+          statusCode: 500,
+          cause: error,
+          details: extractSupabaseErrorDetails(error),
+        },
+      )
+    }
+
+    throwFromSupabaseError(error, {
+      fallbackMessage: 'Failed to update quiz mastery cache.',
+      invalidMessage: 'Invalid mastery level payload.',
+      foreignKeyMessage: 'Question not found.',
+      unauthorizedMessage: 'Quiz mastery update requires authentication.',
+    })
+  }
+
+  const masteryLevelFromRpc = extractMasteryLevelFromRpcResult(data)
+  if (Number.isInteger(masteryLevelFromRpc)) {
+    return masteryLevelFromRpc
+  }
+
+  const { data: cacheRow, error: cacheError } = await supabase
+    .from('mastery_cache')
+    .select('mastery_level')
+    .eq('user_id', normalizedUserId)
+    .eq('question_id', normalizedQuestionId)
+    .maybeSingle()
+
+  if (cacheError) {
+    throwFromSupabaseError(cacheError, {
+      fallbackMessage: 'Failed to verify quiz mastery cache.',
+      unauthorizedMessage: 'Quiz mastery access requires authentication.',
+    })
+  }
+
+  return Number.isInteger(cacheRow?.mastery_level) ? cacheRow.mastery_level : normalizedMasteryLevel
 }
 
 export const listCollectionsWithCounts = async ({ accessToken }) => {

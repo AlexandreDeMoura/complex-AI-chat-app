@@ -6,17 +6,19 @@ import { sendMessage, streamMessage, resumeStream } from './application/chat-ser
 import {
   addQuizQuestionsToCollection,
   deleteQuizQuestion,
+  QuizAnswerPersistenceError,
   QuizBulkPersistenceError,
   QuizCollectionError,
   QuizFeedbackError,
   createQuizCollection,
   deleteQuizCollection,
-  generateQuizFeedback,
   listQuizCollectionQuestions,
   listQuizCollections,
   persistQuizQuestionsBulk,
   removeQuizQuestionFromCollection,
   searchQuizQuestions,
+  submitQuizMcqAnswer,
+  submitQuizOpenAnswer,
   updateQuizQuestion,
   updateQuizCollection,
 } from './application/quiz-service.js'
@@ -46,9 +48,19 @@ const resumeSchema = z.object({
 
 const quizFeedbackSchema = z
   .object({
+    question_id: z.string().trim().min(1, 'question_id is required.'),
     question: z.string().trim().min(1, 'question is required.'),
     user_answer: z.string().trim().min(1, 'user_answer is required.'),
     complete_answer: z.string().trim().min(1, 'complete_answer is required.'),
+  })
+  .strict()
+
+const quizMcqAnswerSchema = z
+  .object({
+    question_id: z.string().trim().min(1, 'question_id is required.'),
+    mode: z.literal('mcq'),
+    user_answer: z.string().trim().min(1, 'user_answer is required.'),
+    is_correct: z.boolean(),
   })
   .strict()
 
@@ -232,6 +244,26 @@ const sendQuizCollectionError = (res, error, logLabel) => {
   res.status(500).json({ error: message })
 }
 
+const sendQuizAnswerError = (res, error, logLabel) => {
+  if (error instanceof QuizFeedbackError) {
+    res.status(error.statusCode).json({ error: error.message })
+    return
+  }
+
+  if (error instanceof QuizAnswerPersistenceError) {
+    const body = { error: error.message }
+    if (error.details) {
+      body.details = error.details
+    }
+    res.status(error.statusCode).json(body)
+    return
+  }
+
+  console.error(`[${logLabel}] unexpected error`, error)
+  const message = error instanceof Error ? error.message : 'Unknown server error.'
+  res.status(500).json({ error: message })
+}
+
 const quizRouter = express.Router()
 quizRouter.use(requireQuizAuth)
 
@@ -245,23 +277,56 @@ quizRouter.post('/feedback', async (req, res) => {
     return
   }
 
+  const userId = typeof req.userId === 'string' ? req.userId : ''
+  const accessToken = typeof req.accessToken === 'string' ? req.accessToken : ''
+
   try {
-    const feedback = await generateQuizFeedback({
+    const result = await submitQuizOpenAnswer({
+      accessToken,
+      userId,
+      questionId: payload.data.question_id,
       question: payload.data.question,
       userAnswer: payload.data.user_answer,
       completeAnswer: payload.data.complete_answer,
     })
 
-    res.json({ feedback })
+    res.json({
+      feedback: result.feedback,
+      grade: result.grade,
+      mastery_level: result.masteryLevel,
+    })
   } catch (error) {
-    if (error instanceof QuizFeedbackError) {
-      res.status(error.statusCode).json({ error: error.message })
-      return
-    }
+    sendQuizAnswerError(res, error, 'quiz.feedback')
+  }
+})
 
-    const message =
-      error instanceof Error ? error.message : 'Unknown server error.'
-    res.status(500).json({ error: message })
+quizRouter.post('/answers', async (req, res) => {
+  const payload = quizMcqAnswerSchema.safeParse(req.body)
+  if (!payload.success) {
+    res.status(400).json({
+      error: 'Invalid quiz answer payload.',
+      issues: formatValidationIssues(payload.error),
+    })
+    return
+  }
+
+  const userId = typeof req.userId === 'string' ? req.userId : ''
+  const accessToken = typeof req.accessToken === 'string' ? req.accessToken : ''
+
+  try {
+    const result = await submitQuizMcqAnswer({
+      accessToken,
+      userId,
+      questionId: payload.data.question_id,
+      userAnswer: payload.data.user_answer,
+      isCorrect: payload.data.is_correct,
+    })
+
+    res.json({
+      mastery_level: result.masteryLevel,
+    })
+  } catch (error) {
+    sendQuizAnswerError(res, error, 'quiz.answers')
   }
 })
 
