@@ -11,6 +11,7 @@ const POSTGRES_INVALID_PARAMETER_VALUE = '22023'
 const POSTGRES_RLS_VIOLATION = '42501'
 const POSTGRES_NO_DATA_FOUND = 'P0002'
 const PGRST_NO_ROWS = 'PGRST116'
+const PGRST_UNDEFINED_FUNCTION = 'PGRST202'
 
 const ORPHAN_STRATEGIES = new Set(['delete', 'reassign'])
 
@@ -322,6 +323,22 @@ const throwFromSupabaseError = (
   })
 }
 
+const isMissingExtendedBulkInsertSignature = (error) => {
+  if (!error || error.code !== PGRST_UNDEFINED_FUNCTION) {
+    return false
+  }
+
+  const details = extractSupabaseErrorDetails(error)
+  const message = details?.message?.toLowerCase() ?? ''
+  const searchedSignature = details?.details?.toLowerCase() ?? ''
+
+  return (
+    message.includes('public.bulk_insert_quiz_questions') &&
+    searchedSignature.includes('p_collection_name_overrides') &&
+    searchedSignature.includes('p_merge_into_collection_id')
+  )
+}
+
 const assertCollectionExists = async ({ supabase, collectionId }) => {
   const { data, error } = await supabase.from('collections').select('id').eq('id', collectionId).maybeSingle()
 
@@ -405,11 +422,28 @@ export const persistBulkQuestions = async ({
     : normalizeBulkCollectionNameOverrides(collectionNameOverrides)
 
   const supabase = createSupabaseRequestClient(accessToken)
-  const { data, error } = await supabase.rpc(BULK_INSERT_RPC_NAME, {
+  let { data, error } = await supabase.rpc(BULK_INSERT_RPC_NAME, {
     p_questions: questions,
     p_collection_name_overrides: normalizedCollectionNameOverrides,
     p_merge_into_collection_id: normalizedMergeIntoCollectionId,
   })
+
+  if (error && isMissingExtendedBulkInsertSignature(error)) {
+    if (normalizedMergeIntoCollectionId || normalizedCollectionNameOverrides) {
+      throw new QuizQuestionRepositoryError(
+        'Collection override options require the latest quiz bulk-insert migration.',
+        {
+          statusCode: 500,
+          cause: error,
+          details: extractSupabaseErrorDetails(error),
+        },
+      )
+    }
+
+    ;({ data, error } = await supabase.rpc(BULK_INSERT_RPC_NAME, {
+      p_questions: questions,
+    }))
+  }
 
   if (error) {
     throwFromSupabaseError(error, {
