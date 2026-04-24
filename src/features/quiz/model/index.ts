@@ -3,6 +3,7 @@ export { buildQuizPrelude } from '@/features/quiz/model/build-quiz-prelude'
 export type { QuizOption, QuizQuestion } from '@/features/quiz/model/schema'
 export type {
   OrphanStrategy,
+  QuizMasteryLevel,
   QuizFeedbackState,
   QuizFeedbackSuccessState,
   QuizFeedbackStatus,
@@ -19,6 +20,8 @@ export type {
   QuizMode,
   QuizQuestionState,
   QuizSessionQuestion,
+  QuizSessionFilters,
+  QuizSessionFilterInput,
   QuizScreen,
   QuizUploadError,
 } from '@/features/quiz/model/types'

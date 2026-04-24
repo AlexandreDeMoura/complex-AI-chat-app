@@ -5,6 +5,7 @@ export type QuizMode = 'open' | 'mcq'
 export type QuizFeedbackStatus = 'idle' | 'loading' | 'success' | 'error'
 export type OrphanStrategy = 'delete' | 'reassign'
 export type QuizUploadReviewMergeMode = 'subject' | 'existing' | 'new'
+export type QuizMasteryLevel = 0 | 1 | 2 | 3 | 4 | 5
 
 export interface QuizUploadError {
   title: string
@@ -95,4 +96,14 @@ export interface QuizQuestionDeleteResult {
 export interface QuizSessionQuestion extends QuizQuestion {
   id: string
   masteryLevel: number
+}
+
+export interface QuizSessionFilters {
+  mastery: QuizMasteryLevel[]
+  difficulty: number[]
+}
+
+export interface QuizSessionFilterInput {
+  mastery?: number[] | null
+  difficulty?: number[] | null
 }
