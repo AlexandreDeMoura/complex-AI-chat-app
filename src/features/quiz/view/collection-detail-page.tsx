@@ -639,7 +639,7 @@ function QuestionRow({
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
             <span className="rounded-full bg-muted px-2 py-1">Subject: {question.subject}</span>
             <span className="rounded-full bg-muted px-2 py-1">Difficulty: {question.difficulty}</span>
-            <span className="rounded-full bg-muted px-2 py-1">Mastery: {question.masteryLevel}</span>
+            <MasteryLevelPill masteryLevel={question.masteryLevel} />
           </div>
         </div>
 
@@ -668,6 +668,37 @@ function QuestionRow({
         </div>
       </div>
     </article>
+  )
+}
+
+interface MasteryLevelPillProps {
+  masteryLevel: number
+}
+
+function MasteryLevelPill({ masteryLevel }: MasteryLevelPillProps) {
+  const normalizedMasteryLevel = Number.isInteger(masteryLevel)
+    ? Math.max(0, Math.min(5, masteryLevel))
+    : 0
+
+  return (
+    <div
+      className="inline-flex items-center gap-2 rounded-full border border-emerald-700/20 bg-emerald-600/10 px-2 py-1 text-emerald-800"
+      aria-label={`Mastery level ${normalizedMasteryLevel} out of 5`}
+    >
+      <span className="text-[11px] font-semibold uppercase tracking-wide">Mastery</span>
+      <span className="text-xs font-semibold">{normalizedMasteryLevel}/5</span>
+      <span className="flex items-center gap-0.5" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => (
+          <span
+            key={index}
+            className={cn(
+              'h-1.5 w-3 rounded-[2px]',
+              index < normalizedMasteryLevel ? 'bg-emerald-700' : 'bg-emerald-900/20',
+            )}
+          />
+        ))}
+      </span>
+    </div>
   )
 }
 

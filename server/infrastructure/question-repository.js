@@ -994,7 +994,9 @@ export const searchQuestions = async ({ accessToken, search, excludeCollectionId
 
   let query = supabase
     .from('questions')
-    .select('id, question, mcq_question, complete_answer, mcq_options, subject, difficulty, created_at, updated_at')
+    .select(
+      'id, question, mcq_question, complete_answer, mcq_options, subject, difficulty, created_at, updated_at, mastery_cache(mastery_level)',
+    )
     .order('updated_at', { ascending: false })
     .limit(normalizedLimit)
 
@@ -1185,7 +1187,9 @@ export const updateQuestion = async ({
     .from('questions')
     .update(updates)
     .eq('id', questionId)
-    .select('id, question, mcq_question, complete_answer, mcq_options, subject, difficulty, created_at, updated_at')
+    .select(
+      'id, question, mcq_question, complete_answer, mcq_options, subject, difficulty, created_at, updated_at, mastery_cache(mastery_level)',
+    )
     .single()
 
   if (error) {
