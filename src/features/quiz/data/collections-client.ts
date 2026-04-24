@@ -86,6 +86,13 @@ interface DeleteQuizQuestionParams {
   questionId: string
 }
 
+interface ListQuizCollectionQuestionsParams {
+  accessToken: string
+  collectionId: string
+  mastery?: number[]
+  difficulty?: number[]
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -322,6 +329,54 @@ function buildOrphanStrategyQuery({
   return query ? `?${query}` : ''
 }
 
+function normalizeIntegerQueryFilter(
+  value: number[] | undefined,
+  {
+    fieldLabel,
+    min,
+    max,
+  }: {
+    fieldLabel: string
+    min?: number
+    max?: number
+  },
+): number[] | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  if (!Array.isArray(value)) {
+    throw new QuizApiError(`${fieldLabel} filter must be an array of integers.`, 400)
+  }
+
+  const normalized: number[] = []
+  const seen = new Set<number>()
+
+  for (const entry of value) {
+    if (!Number.isInteger(entry)) {
+      throw new QuizApiError(`${fieldLabel} filter must contain only integers.`, 400)
+    }
+
+    const isOutOfRange = (min !== undefined && entry < min) || (max !== undefined && entry > max)
+    if (isOutOfRange) {
+      if (min !== undefined && max !== undefined) {
+        throw new QuizApiError(`${fieldLabel} filter values must be between ${min} and ${max}.`, 400)
+      }
+
+      throw new QuizApiError(`${fieldLabel} filter contains an out-of-range value.`, 400)
+    }
+
+    if (seen.has(entry)) {
+      continue
+    }
+
+    seen.add(entry)
+    normalized.push(entry)
+  }
+
+  return normalized.length > 0 ? normalized : null
+}
+
 export function extractOrphanQuestionIdsFromDetails(details: unknown): string[] {
   if (!isRecord(details)) {
     return []
@@ -402,19 +457,42 @@ export async function createQuizCollection({
 export async function listQuizCollectionQuestions({
   accessToken,
   collectionId,
-}: {
-  accessToken: string
-  collectionId: string
-}): Promise<QuizCollectionQuestion[]> {
+  mastery,
+  difficulty,
+}: ListQuizCollectionQuestionsParams): Promise<QuizCollectionQuestion[]> {
   const normalizedCollectionId = collectionId.trim()
   if (!normalizedCollectionId) {
     throw new QuizApiError('Collection id is required.', 400)
   }
 
-  const response = await fetch(`/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}/questions`, {
-    method: 'GET',
-    headers: createAuthorizedJsonHeaders(accessToken),
+  const normalizedMastery = normalizeIntegerQueryFilter(mastery, {
+    fieldLabel: 'Mastery',
+    min: 0,
+    max: 5,
   })
+  const normalizedDifficulty = normalizeIntegerQueryFilter(difficulty, {
+    fieldLabel: 'Difficulty',
+    min: -32768,
+    max: 32767,
+  })
+
+  const params = new URLSearchParams()
+  if (normalizedMastery) {
+    params.set('mastery', normalizedMastery.join(','))
+  }
+
+  if (normalizedDifficulty) {
+    params.set('difficulty', normalizedDifficulty.join(','))
+  }
+
+  const query = params.toString()
+  const response = await fetch(
+    `/api/quiz/collections/${encodeURIComponent(normalizedCollectionId)}/questions${query ? `?${query}` : ''}`,
+    {
+      method: 'GET',
+      headers: createAuthorizedJsonHeaders(accessToken),
+    },
+  )
 
   if (!response.ok) {
     throw await parseQuizApiError(response, 'Failed to load collection questions.')
