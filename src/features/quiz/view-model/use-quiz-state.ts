@@ -5,6 +5,7 @@ import {
   listQuizCollections,
   parseQuizUploadFile,
   persistQuizQuestionsBulk,
+  submitMcqAnswer as persistMcqAnswerAttempt,
   QuizApiError,
 } from '@/features/quiz/data'
 import type {
@@ -14,6 +15,7 @@ import type {
   QuizMode,
   QuizQuestion,
   QuizQuestionState,
+  QuizSessionQuestion,
   QuizScreen,
   QuizUploadReviewCollection,
   QuizUploadReviewMergeMode,
@@ -87,6 +89,7 @@ function buildUploadReviewCollections(
 interface OpenFeedbackRequest {
   questionIndex: number
   quizSessionId: number
+  questionId: string
   question: string
   userAnswer: string
   completeAnswer: string
@@ -111,11 +114,12 @@ export interface QuizViewModel {
   currentQuestionIndex: number
   availableSubjects: string[]
   selectedSubject: string | null
-  currentQuestion: QuizQuestion | null
+  currentQuestion: QuizSessionQuestion | null
   openDraftAnswer: string
   submittedOpenAnswer: string | null
   feedbackStatus: QuizFeedbackStatus
   feedbackText: string | null
+  feedbackGrade: number | null
   feedbackError: string | null
   selectedMcqOptionIndex: number | null
   submittedMcqOptionIndex: number | null
@@ -160,7 +164,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
   const [reviewNewCollectionDescription, setReviewNewCollectionDescription] = useState('')
   const [isLoadingReviewCollections, setIsLoadingReviewCollections] = useState(false)
   const [reviewCollectionsLoadError, setReviewCollectionsLoadError] = useState<string | null>(null)
-  const [questions, setQuestions] = useState<QuizQuestion[]>([])
+  const [questions, setQuestions] = useState<QuizSessionQuestion[]>([])
   const [questionStates, setQuestionStates] = useState<QuizQuestionState[]>([])
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [uploadError, setUploadError] = useState<QuizUploadError | null>(null)
@@ -239,6 +243,31 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     [],
   )
 
+  const updateQuestionMasteryAtIndex = useCallback((questionIndex: number, masteryLevel: number) => {
+    if (!Number.isInteger(masteryLevel) || masteryLevel < 0 || masteryLevel > 5) {
+      return
+    }
+
+    setQuestions((previousQuestions) => {
+      const currentQuestion = previousQuestions[questionIndex]
+      if (!currentQuestion) {
+        return previousQuestions
+      }
+
+      const nextMasteryLevel = Math.max(currentQuestion.masteryLevel, masteryLevel)
+      if (nextMasteryLevel === currentQuestion.masteryLevel) {
+        return previousQuestions
+      }
+
+      const nextQuestions = [...previousQuestions]
+      nextQuestions[questionIndex] = {
+        ...currentQuestion,
+        masteryLevel: nextMasteryLevel,
+      }
+      return nextQuestions
+    })
+  }, [])
+
   const updateCurrentQuestionState = useCallback(
     (update: (state: QuizQuestionState) => QuizQuestionState) => {
       updateQuestionStateAtIndex(actualQuestionIndex, update)
@@ -246,7 +275,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     [actualQuestionIndex, updateQuestionStateAtIndex],
   )
 
-  const startQuizSession = useCallback((nextQuestions: QuizQuestion[]) => {
+  const startQuizSession = useCallback((nextQuestions: QuizSessionQuestion[]) => {
     setQuestions(nextQuestions)
     setQuestionStates(nextQuestions.map(() => createInitialQuestionState()))
     setCurrentQuestionIndex(0)
@@ -509,14 +538,31 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
         setReviewExistingCollectionId(createdCollection.id)
       }
 
-      await persistQuizQuestionsBulk({
+      const persistenceResult = await persistQuizQuestionsBulk({
         accessToken,
         questions: reviewQuestions,
         collectionNameOverrides,
         mergeIntoCollectionId,
       })
 
-      startQuizSession(reviewQuestions)
+      if (persistenceResult.questionIds.length !== reviewQuestions.length) {
+        throw new QuizApiError('Quiz persistence response does not match the imported question count.', 502)
+      }
+
+      const persistedQuestions: QuizSessionQuestion[] = reviewQuestions.map((question, index) => {
+        const questionId = persistenceResult.questionIds[index]?.trim()
+        if (!questionId) {
+          throw new QuizApiError('Quiz persistence response is missing a question identifier.', 502)
+        }
+
+        return {
+          ...question,
+          id: questionId,
+          masteryLevel: 0,
+        }
+      })
+
+      startQuizSession(persistedQuestions)
     } catch (error) {
       if (error instanceof QuizApiError) {
         console.error('[quiz.upload.review] persistence failed', {
@@ -564,6 +610,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     async ({
       questionIndex,
       quizSessionId,
+      questionId,
       question,
       userAnswer,
       completeAnswer,
@@ -589,8 +636,9 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
       }
 
       try {
-        const feedback = await fetchFeedback({
+        const result = await fetchFeedback({
           accessToken,
+          questionId,
           question,
           userAnswer,
           completeAnswer,
@@ -612,10 +660,12 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
             ...currentState,
             feedback: {
               status: 'success',
-              feedback,
+              feedback: result.feedback,
+              grade: result.grade,
             },
           }
         })
+        updateQuestionMasteryAtIndex(questionIndex, result.masteryLevel)
       } catch (error) {
         if (quizSessionIdRef.current !== quizSessionId) {
           return
@@ -644,7 +694,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
         })
       }
     },
-    [accessToken, updateQuestionStateAtIndex],
+    [accessToken, updateQuestionMasteryAtIndex, updateQuestionStateAtIndex],
   )
 
   const setMode = useCallback((mode: QuizMode) => {
@@ -722,6 +772,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     void requestOpenAnswerFeedback({
       questionIndex: actualQuestionIndex,
       quizSessionId,
+      questionId: question.id,
       question: question.question,
       userAnswer: submittedAnswer,
       completeAnswer: question.complete_answer,
@@ -766,24 +817,88 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
   )
 
   const submitMcqAnswer = useCallback(() => {
-    updateCurrentQuestionState((currentState) => {
-      if (currentState.mcq.submittedOptionIndex !== null) {
-        return currentState
-      }
+    const question = questions[actualQuestionIndex]
+    const currentQuestionState = questionStates[actualQuestionIndex]
+    if (!question || !currentQuestionState) {
+      return
+    }
 
-      if (currentState.mcq.selectedOptionIndex === null) {
-        return currentState
+    if (currentQuestionState.mcq.submittedOptionIndex !== null) {
+      return
+    }
+
+    const selectedOptionIndex = currentQuestionState.mcq.selectedOptionIndex
+    if (selectedOptionIndex === null) {
+      return
+    }
+
+    const selectedOption = question.mcq_options[selectedOptionIndex]
+    if (!selectedOption) {
+      return
+    }
+
+    updateQuestionStateAtIndex(actualQuestionIndex, (state) => {
+      if (state.mcq.submittedOptionIndex !== null) {
+        return state
       }
 
       return {
-        ...currentState,
+        ...state,
         mcq: {
-          ...currentState.mcq,
-          submittedOptionIndex: currentState.mcq.selectedOptionIndex,
+          ...state.mcq,
+          submittedOptionIndex: selectedOptionIndex,
         },
       }
     })
-  }, [updateCurrentQuestionState])
+
+    if (!accessToken) {
+      console.warn('[quiz.mcq] skipping persistence: missing access token')
+      return
+    }
+
+    const quizSessionId = quizSessionIdRef.current
+    const persistAttempt = async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const result = await persistMcqAnswerAttempt({
+            accessToken,
+            questionId: question.id,
+            userAnswer: selectedOption.option,
+            isCorrect: Boolean(selectedOption.is_correct),
+          })
+
+          if (quizSessionIdRef.current !== quizSessionId) {
+            return
+          }
+
+          updateQuestionMasteryAtIndex(actualQuestionIndex, result.masteryLevel)
+          return
+        } catch (error) {
+          const isUnauthorizedError = error instanceof QuizApiError && error.statusCode === 401
+          const canRetry = attempt === 0 && !isUnauthorizedError
+          if (canRetry) {
+            continue
+          }
+
+          console.warn('[quiz.mcq] answer persistence failed', {
+            questionId: question.id,
+            attempt: attempt + 1,
+            message: error instanceof Error ? error.message : String(error),
+          })
+          return
+        }
+      }
+    }
+
+    void persistAttempt()
+  }, [
+    accessToken,
+    actualQuestionIndex,
+    questionStates,
+    questions,
+    updateQuestionMasteryAtIndex,
+    updateQuestionStateAtIndex,
+  ])
 
   const goToPreviousQuestion = useCallback(() => {
     setCurrentQuestionIndex((previousQuestionIndex) => Math.max(previousQuestionIndex - 1, 0))
@@ -854,6 +969,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
   const feedbackState: QuizFeedbackState = currentQuestionState?.feedback ?? { status: 'idle' }
   const feedbackStatus = feedbackState.status
   const feedbackText = feedbackState.status === 'success' ? feedbackState.feedback : null
+  const feedbackGrade = feedbackState.status === 'success' ? feedbackState.grade : null
   const feedbackError = feedbackState.status === 'error' ? feedbackState.message : null
   const selectedMcqOptionIndex = currentQuestionState?.mcq.selectedOptionIndex ?? null
   const submittedMcqOptionIndex = currentQuestionState?.mcq.submittedOptionIndex ?? null
@@ -908,6 +1024,7 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     submittedOpenAnswer,
     feedbackStatus,
     feedbackText,
+    feedbackGrade,
     feedbackError,
     selectedMcqOptionIndex,
     submittedMcqOptionIndex,

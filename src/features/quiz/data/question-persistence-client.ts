@@ -18,6 +18,11 @@ interface PersistQuizQuestionsBulkApiResponse {
   collectionIds?: unknown
 }
 
+export interface PersistQuizQuestionsBulkResult {
+  questionIds: string[]
+  collectionIds: string[]
+}
+
 function normalizeStringList(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return []
@@ -46,7 +51,7 @@ export async function persistQuizQuestionsBulk({
   questions,
   collectionNameOverrides,
   mergeIntoCollectionId,
-}: PersistQuizQuestionsBulkParams): Promise<void> {
+}: PersistQuizQuestionsBulkParams): Promise<PersistQuizQuestionsBulkResult> {
   const normalizedMergeIntoCollectionId =
     typeof mergeIntoCollectionId === 'string' ? mergeIntoCollectionId.trim() : ''
 
@@ -91,5 +96,10 @@ export async function persistQuizQuestionsBulk({
 
   if (!userId || questionIds.length === 0 || collectionIds.length === 0) {
     throw new QuizApiError('Quiz persistence response is missing expected identifiers.', 502)
+  }
+
+  return {
+    questionIds,
+    collectionIds,
   }
 }

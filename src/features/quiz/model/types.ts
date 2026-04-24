@@ -1,4 +1,4 @@
-import type { QuizOption } from '@/features/quiz/model/schema'
+import type { QuizOption, QuizQuestion } from '@/features/quiz/model/schema'
 
 export type QuizScreen = 'upload' | 'review' | 'question'
 export type QuizMode = 'open' | 'mcq'
@@ -21,10 +21,16 @@ export interface McqModeAnswerState {
   submittedOptionIndex: number | null
 }
 
+export interface QuizFeedbackSuccessState {
+  status: 'success'
+  feedback: string
+  grade: number | null
+}
+
 export type QuizFeedbackState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'success'; feedback: string }
+  | QuizFeedbackSuccessState
   | { status: 'error'; message: string }
 
 export interface QuizQuestionState {
@@ -84,4 +90,9 @@ export interface QuizCollectionQuestionLinkResult {
 
 export interface QuizQuestionDeleteResult {
   id: string
+}
+
+export interface QuizSessionQuestion extends QuizQuestion {
+  id: string
+  masteryLevel: number
 }

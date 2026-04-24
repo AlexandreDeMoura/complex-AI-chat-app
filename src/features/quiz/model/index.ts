@@ -4,6 +4,7 @@ export type { QuizOption, QuizQuestion } from '@/features/quiz/model/schema'
 export type {
   OrphanStrategy,
   QuizFeedbackState,
+  QuizFeedbackSuccessState,
   QuizFeedbackStatus,
   QuizCollectionDeleteResult,
   QuizCollectionQuestion,
@@ -17,6 +18,7 @@ export type {
   OpenModeAnswerState,
   QuizMode,
   QuizQuestionState,
+  QuizSessionQuestion,
   QuizScreen,
   QuizUploadError,
 } from '@/features/quiz/model/types'

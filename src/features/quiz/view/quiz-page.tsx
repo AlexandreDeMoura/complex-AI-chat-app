@@ -61,6 +61,7 @@ export function QuizPage() {
     submittedOpenAnswer,
     feedbackStatus,
     feedbackText,
+    feedbackGrade,
     feedbackError,
     selectedMcqOptionIndex,
     submittedMcqOptionIndex,
@@ -188,6 +189,7 @@ export function QuizPage() {
               submittedOpenAnswer={submittedOpenAnswer}
               feedbackStatus={feedbackStatus}
               feedbackText={feedbackText}
+              feedbackGrade={feedbackGrade}
               feedbackError={feedbackError}
               selectedMcqOptionIndex={selectedMcqOptionIndex}
               submittedMcqOptionIndex={submittedMcqOptionIndex}
@@ -554,6 +556,7 @@ interface QuestionShellProps {
   submittedOpenAnswer: string | null
   feedbackStatus: QuizFeedbackStatus
   feedbackText: string | null
+  feedbackGrade: number | null
   feedbackError: string | null
   selectedMcqOptionIndex: number | null
   submittedMcqOptionIndex: number | null
@@ -586,6 +589,7 @@ function QuestionShell({
   submittedOpenAnswer,
   feedbackStatus,
   feedbackText,
+  feedbackGrade,
   feedbackError,
   selectedMcqOptionIndex,
   submittedMcqOptionIndex,
@@ -707,6 +711,7 @@ function QuestionShell({
               <OpenAnswerFeedbackSection
                 feedbackStatus={feedbackStatus}
                 feedbackText={feedbackText}
+                feedbackGrade={feedbackGrade}
                 feedbackError={feedbackError}
               />
 
@@ -813,12 +818,14 @@ function QuestionShell({
 interface OpenAnswerFeedbackSectionProps {
   feedbackStatus: QuizFeedbackStatus
   feedbackText: string | null
+  feedbackGrade: number | null
   feedbackError: string | null
 }
 
 function OpenAnswerFeedbackSection({
   feedbackStatus,
   feedbackText,
+  feedbackGrade,
   feedbackError,
 }: OpenAnswerFeedbackSectionProps) {
   if (feedbackStatus === 'idle') {
@@ -867,9 +874,41 @@ function OpenAnswerFeedbackSection({
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         AI feedback
       </p>
+      <AttemptGradeIndicator grade={feedbackGrade} />
       <MarkdownText density="compact" className="mt-1 text-sm">
         {feedbackText || 'No feedback available.'}
       </MarkdownText>
+    </div>
+  )
+}
+
+interface AttemptGradeIndicatorProps {
+  grade: number | null
+}
+
+function AttemptGradeIndicator({ grade }: AttemptGradeIndicatorProps) {
+  if (grade === null) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        Grade unavailable for this attempt.
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2" aria-label={`Grade ${grade} out of 5`}>
+      <span className="text-sm font-semibold text-[#2F6868]">{grade}/5</span>
+      <div className="flex items-center gap-1">
+        {Array.from({ length: 5 }, (_, index) => (
+          <span
+            key={index}
+            className={cn(
+              'h-2 w-2 rounded-full',
+              index < grade ? 'bg-[#2F6868]' : 'bg-muted-foreground/25',
+            )}
+          />
+        ))}
+      </div>
     </div>
   )
 }
