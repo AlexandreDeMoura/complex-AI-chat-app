@@ -44,6 +44,7 @@ export interface SessionViewModel {
   answeredQuestionCount: number
   isPoolLoading: boolean
   poolError: string | null
+  configureSession: (collectionId: string) => Promise<boolean>
   startSession: (collectionId: string, filters: QuizSessionFilterInput) => Promise<boolean>
   nextQuestion: () => void
   updateFilters: (filters: QuizSessionFilterInput) => Promise<boolean>
@@ -282,6 +283,75 @@ export function useSessionViewModel({
     setPoolError(null)
   }, [])
 
+  const configureSession = useCallback(async (nextCollectionId: string): Promise<boolean> => {
+    const normalizedCollectionId = nextCollectionId.trim()
+    if (!normalizedCollectionId) {
+      setPoolError('Collection id is required to configure a session.')
+      return false
+    }
+
+    if (!accessToken) {
+      setPoolError(QUIZ_AUTH_ERROR_MESSAGE)
+      return false
+    }
+
+    const requestId = latestPoolRequestId.current + 1
+    latestPoolRequestId.current = requestId
+    setIsPoolLoading(true)
+    setPoolError(null)
+
+    try {
+      const allCollectionQuestions = await listQuizCollectionQuestions({
+        accessToken,
+        collectionId: normalizedCollectionId,
+      })
+
+      if (latestPoolRequestId.current !== requestId) {
+        return false
+      }
+
+      const nextAvailableDifficulties = getSortedDifficultyValues(allCollectionQuestions)
+      const normalizedFilters: QuizSessionFilters = {
+        mastery: [...QUIZ_SESSION_ALL_MASTERY_LEVELS],
+        difficulty: nextAvailableDifficulties,
+      }
+
+      setCollectionId(normalizedCollectionId)
+      setDraftFilters(normalizedFilters)
+      setAppliedFilters(normalizedFilters)
+      setAnsweredInSession([])
+      setPool(buildSessionPool({
+        questions: allCollectionQuestions,
+        excludedQuestionIds: new Set<string>(),
+      }))
+      setQuestionById(buildQuestionMap(allCollectionQuestions))
+      setCurrentQuestionId(null)
+      setSessionActive(false)
+      setAvailableDifficulties(nextAvailableDifficulties)
+      setMatchingQuestionCount(allCollectionQuestions.length)
+      return true
+    } catch (error) {
+      if (latestPoolRequestId.current !== requestId) {
+        return false
+      }
+
+      if (error instanceof QuizApiError) {
+        const errorMessage = error.statusCode === 401
+          ? QUIZ_AUTH_ERROR_MESSAGE
+          : formatQuizApiError(error)
+        setPoolError(errorMessage)
+      } else {
+        setPoolError('Unable to prepare this session right now.')
+      }
+
+      return false
+    } finally {
+      if (latestPoolRequestId.current === requestId) {
+        setIsPoolLoading(false)
+      }
+    }
+  }, [accessToken])
+
   const startSession = useCallback(async (
     nextCollectionId: string,
     filters: QuizSessionFilterInput,
@@ -387,7 +457,7 @@ export function useSessionViewModel({
   ): Promise<boolean> => {
     const normalizedCollectionId = collectionId?.trim() ?? ''
     if (!normalizedCollectionId) {
-      setPoolError('Start a session before updating filters.')
+      setPoolError('Select a collection before updating filters.')
       return false
     }
 
@@ -518,6 +588,7 @@ export function useSessionViewModel({
     answeredQuestionCount: answeredInSession.length,
     isPoolLoading,
     poolError,
+    configureSession,
     startSession,
     nextQuestion,
     updateFilters,
@@ -530,6 +601,7 @@ export function useSessionViewModel({
     currentQuestion,
     draftFilters,
     endSession,
+    configureSession,
     isPoolLoading,
     matchingQuestionCount,
     nextQuestion,

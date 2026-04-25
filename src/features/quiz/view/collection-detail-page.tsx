@@ -4,16 +4,22 @@ import { type ZodIssue } from 'zod'
 import {
   ArrowLeft,
   BookCopy,
+  CheckCircle2,
+  Circle,
   FolderOpen,
   Loader2,
   LogOut,
+  MessageCircle,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Trash2,
   Upload,
   X,
+  XCircle,
 } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -26,17 +32,25 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MarkdownText } from '@/components/thread/markdown-text'
 import { useAuth } from '@/features/auth/view-model'
 import {
+  buildQuizPrelude,
   quizQuestionSchema,
   type QuizCollectionQuestion,
   type QuizCollectionSummary,
+  type QuizFeedbackStatus,
+  type QuizMode,
   type QuizOption,
+  type QuizSessionQuestion,
 } from '@/features/quiz/model'
 import {
   type OrphanResolutionState,
   useCollectionDetailViewModel,
+  useSessionQuestionViewModel,
+  useSessionViewModel,
 } from '@/features/quiz/view-model'
+import { QuizChatModal } from '@/features/quiz/view/quiz-chat-modal'
 import { cn } from '@/lib/utils'
 
 interface QuestionEditInput {
@@ -57,6 +71,11 @@ interface QuestionEditDraft {
   mcqOptions: string[]
   correctOptionIndex: number
 }
+
+type CollectionDetailScreen = 'detail' | 'sessionConfig' | 'sessionQuestion'
+
+const QUIZ_SESSION_END_CONFIRMATION_MESSAGE =
+  'End this session? Progress is saved per-question but session cannot be resumed.'
 
 export function CollectionDetailPage() {
   const navigate = useNavigate()
@@ -104,8 +123,60 @@ export function CollectionDetailPage() {
     collectionId,
   })
 
+  const {
+    collectionId: sessionCollectionId,
+    draftFilters: sessionDraftFilters,
+    answeredInSession,
+    currentQuestion: sessionCurrentQuestion,
+    sessionActive,
+    availableDifficulties,
+    matchingQuestionCount,
+    remainingQuestionCount,
+    answeredQuestionCount,
+    isPoolLoading: isSessionPoolLoading,
+    poolError: sessionPoolError,
+    configureSession,
+    startSession,
+    nextQuestion,
+    updateFilters,
+    endSession,
+  } = useSessionViewModel({
+    accessToken,
+  })
+
+  const {
+    mode: sessionMode,
+    openDraftAnswer: sessionOpenDraftAnswer,
+    submittedOpenAnswer: sessionSubmittedOpenAnswer,
+    feedbackStatus: sessionFeedbackStatus,
+    feedbackText: sessionFeedbackText,
+    feedbackGrade: sessionFeedbackGrade,
+    feedbackError: sessionFeedbackError,
+    selectedMcqOptionIndex: sessionSelectedMcqOptionIndex,
+    submittedMcqOptionIndex: sessionSubmittedMcqOptionIndex,
+    isOpenSubmitted: isSessionOpenSubmitted,
+    isMcqSubmitted: isSessionMcqSubmitted,
+    canGoToNextQuestion,
+    masteryLevel: sessionMasteryLevel,
+    questionState: sessionQuestionState,
+    setMode: setSessionMode,
+    setOpenDraftAnswer: setSessionOpenDraftAnswer,
+    submitOpenAnswer: submitSessionOpenAnswer,
+    selectMcqOption: selectSessionMcqOption,
+    submitMcqAnswer: submitSessionMcqAnswer,
+  } = useSessionQuestionViewModel({
+    accessToken,
+    question: sessionCurrentQuestion,
+  })
+
   const [nameDraft, setNameDraft] = useState('')
   const [descriptionDraft, setDescriptionDraft] = useState('')
+
+  const [screen, setScreen] = useState<CollectionDetailScreen>('detail')
+  const [isSessionFiltersOpen, setIsSessionFiltersOpen] = useState(false)
+  const [isQuizChatOpen, setIsQuizChatOpen] = useState(false)
+  const [quizChatThreadId, setQuizChatThreadId] = useState<string | null>(null)
+  const [quizChatSystemContext, setQuizChatSystemContext] = useState<string | null>(null)
 
   const [isQuestionPickerOpen, setIsQuestionPickerOpen] = useState(false)
   const [questionPickerSearch, setQuestionPickerSearch] = useState('')
@@ -159,6 +230,23 @@ export function CollectionDetailPage() {
       clearUpdateQuestionError()
     }
   }, [clearUpdateQuestionError, editingQuestionId, questions])
+
+  useEffect(() => {
+    setScreen('detail')
+    setIsSessionFiltersOpen(false)
+    setIsQuizChatOpen(false)
+    setQuizChatThreadId(null)
+    setQuizChatSystemContext(null)
+    endSession()
+  }, [collectionId, endSession])
+
+  useEffect(() => {
+    if (screen !== 'sessionQuestion') {
+      setIsQuizChatOpen(false)
+      setQuizChatThreadId(null)
+      setQuizChatSystemContext(null)
+    }
+  }, [screen])
 
   const editingQuestion = useMemo(
     () => questions.find((question) => question.id === editingQuestionId) ?? null,
@@ -308,6 +396,129 @@ export function CollectionDetailPage() {
     return true
   }, [updateQuestion])
 
+  const applySessionFilters = useCallback(async (nextFilters: { mastery: number[]; difficulty: number[] }) => {
+    await updateFilters(nextFilters)
+  }, [updateFilters])
+
+  const toggleSessionMasteryFilter = useCallback((masteryLevel: number) => {
+    const nextMasteryLevels = sessionDraftFilters.mastery.includes(masteryLevel as 0 | 1 | 2 | 3 | 4 | 5)
+      ? sessionDraftFilters.mastery.filter((entry) => entry !== masteryLevel)
+      : [...sessionDraftFilters.mastery, masteryLevel]
+
+    void applySessionFilters({
+      mastery: nextMasteryLevels,
+      difficulty: sessionDraftFilters.difficulty,
+    })
+  }, [applySessionFilters, sessionDraftFilters.difficulty, sessionDraftFilters.mastery])
+
+  const toggleSessionDifficultyFilter = useCallback((difficulty: number) => {
+    const nextDifficulties = sessionDraftFilters.difficulty.includes(difficulty)
+      ? sessionDraftFilters.difficulty.filter((entry) => entry !== difficulty)
+      : [...sessionDraftFilters.difficulty, difficulty]
+
+    void applySessionFilters({
+      mastery: sessionDraftFilters.mastery,
+      difficulty: nextDifficulties,
+    })
+  }, [applySessionFilters, sessionDraftFilters.difficulty, sessionDraftFilters.mastery])
+
+  const handleOpenSessionConfiguration = useCallback(() => {
+    if (!collection) {
+      return
+    }
+
+    setScreen('sessionConfig')
+    setIsSessionFiltersOpen(false)
+    void configureSession(collection.id)
+  }, [collection, configureSession])
+
+  const closeSessionFlow = useCallback(() => {
+    setScreen('detail')
+    setIsSessionFiltersOpen(false)
+    setIsQuizChatOpen(false)
+    setQuizChatThreadId(null)
+    setQuizChatSystemContext(null)
+    endSession()
+  }, [endSession])
+
+  const handleStartSession = useCallback(async () => {
+    const activeCollectionId = sessionCollectionId ?? collection?.id ?? null
+    if (!activeCollectionId) {
+      return
+    }
+
+    const wasStarted = await startSession(activeCollectionId, sessionDraftFilters)
+    if (!wasStarted) {
+      return
+    }
+
+    setScreen('sessionQuestion')
+    setIsSessionFiltersOpen(false)
+  }, [collection?.id, sessionCollectionId, sessionDraftFilters, startSession])
+
+  const handleNextSessionQuestion = useCallback(() => {
+    if (!canGoToNextQuestion) {
+      return
+    }
+
+    nextQuestion()
+  }, [canGoToNextQuestion, nextQuestion])
+
+  const handleEndSession = useCallback(() => {
+    const shouldEndSession = window.confirm(QUIZ_SESSION_END_CONFIRMATION_MESSAGE)
+    if (!shouldEndSession) {
+      return
+    }
+
+    closeSessionFlow()
+    void refreshDetail()
+  }, [closeSessionFlow, refreshDetail])
+
+  const openSessionQuizChat = useCallback(() => {
+    if (!sessionCurrentQuestion || !sessionQuestionState) {
+      return
+    }
+
+    const preludeQuestion: QuizSessionQuestion = {
+      id: sessionCurrentQuestion.id,
+      question: sessionCurrentQuestion.question,
+      mcq_question: sessionCurrentQuestion.mcqQuestion,
+      complete_answer: sessionCurrentQuestion.completeAnswer,
+      mcq_options: sessionCurrentQuestion.mcqOptions,
+      subject: sessionCurrentQuestion.subject,
+      difficulty: sessionCurrentQuestion.difficulty,
+      masteryLevel: sessionMasteryLevel,
+    }
+
+    const threadId = crypto.randomUUID()
+    const prelude = buildQuizPrelude({
+      question: preludeQuestion,
+      questionState: sessionQuestionState,
+    })
+
+    setQuizChatThreadId(threadId)
+    setQuizChatSystemContext(prelude)
+    setIsQuizChatOpen(true)
+  }, [sessionCurrentQuestion, sessionMasteryLevel, sessionQuestionState])
+
+  const closeSessionQuizChat = useCallback(() => {
+    setIsQuizChatOpen(false)
+    setQuizChatThreadId(null)
+    setQuizChatSystemContext(null)
+  }, [])
+
+  const showSessionConfiguration = screen === 'sessionConfig'
+  const showSessionQuestionScreen = screen === 'sessionQuestion'
+  const isSessionCompleted = showSessionQuestionScreen
+    && sessionActive
+    && sessionCurrentQuestion === null
+    && !isSessionPoolLoading
+
+  const shouldDisableSessionStart =
+    matchingQuestionCount === 0
+    || isSessionPoolLoading
+    || availableDifficulties.length === 0
+
   if (!collectionId) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background p-4">
@@ -375,166 +586,248 @@ export function CollectionDetailPage() {
 
       <main className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-6">
-          {detailLoadError ? (
-            <section className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4">
-              <p className="text-sm font-medium text-destructive">{detailLoadError}</p>
-              <div className="mt-3 flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void refreshDetail()
-                  }}
-                >
-                  Retry
-                </Button>
-                <Button variant="ghost" asChild>
-                  <Link to="/quiz/collections">Back to collections</Link>
-                </Button>
-              </div>
-            </section>
+          {showSessionConfiguration ? (
+            <SessionConfigurationScreen
+              collectionName={collection?.name ?? 'Collection'}
+              questionCount={questions.length}
+              selectedMasteryLevels={sessionDraftFilters.mastery}
+              selectedDifficulties={sessionDraftFilters.difficulty}
+              availableDifficulties={availableDifficulties}
+              matchingQuestionCount={matchingQuestionCount}
+              isLoading={isSessionPoolLoading}
+              isFiltersDisabled={isSessionPoolLoading || !sessionCollectionId}
+              error={sessionPoolError}
+              canStart={!shouldDisableSessionStart}
+              onToggleMasteryLevel={toggleSessionMasteryFilter}
+              onToggleDifficulty={toggleSessionDifficultyFilter}
+              onCancel={closeSessionFlow}
+              onStart={() => {
+                void handleStartSession()
+              }}
+            />
           ) : null}
 
-          {isLoadingDetail && !collection ? (
-            <CollectionDetailLoadingState />
+          {showSessionQuestionScreen ? (
+            <SessionQuestionScreen
+              collectionName={collection?.name ?? 'Collection'}
+              question={sessionCurrentQuestion}
+              mode={sessionMode}
+              masteryLevel={sessionMasteryLevel}
+              answeredQuestionCount={answeredQuestionCount}
+              remainingQuestionCount={remainingQuestionCount}
+              matchingQuestionCount={matchingQuestionCount}
+              answeredInSessionCount={answeredInSession.length}
+              selectedMasteryLevels={sessionDraftFilters.mastery}
+              selectedDifficulties={sessionDraftFilters.difficulty}
+              availableDifficulties={availableDifficulties}
+              isLoading={isSessionPoolLoading}
+              error={sessionPoolError}
+              isFiltersOpen={isSessionFiltersOpen}
+              isCompleted={isSessionCompleted}
+              openDraftAnswer={sessionOpenDraftAnswer}
+              submittedOpenAnswer={sessionSubmittedOpenAnswer}
+              feedbackStatus={sessionFeedbackStatus}
+              feedbackText={sessionFeedbackText}
+              feedbackGrade={sessionFeedbackGrade}
+              feedbackError={sessionFeedbackError}
+              selectedMcqOptionIndex={sessionSelectedMcqOptionIndex}
+              submittedMcqOptionIndex={sessionSubmittedMcqOptionIndex}
+              isOpenSubmitted={isSessionOpenSubmitted}
+              isMcqSubmitted={isSessionMcqSubmitted}
+              canGoToNextQuestion={canGoToNextQuestion}
+              onToggleFiltersOpen={() => {
+                setIsSessionFiltersOpen((currentValue) => !currentValue)
+              }}
+              onToggleMasteryLevel={toggleSessionMasteryFilter}
+              onToggleDifficulty={toggleSessionDifficultyFilter}
+              onChangeMode={setSessionMode}
+              onOpenAnswerChange={setSessionOpenDraftAnswer}
+              onSubmitOpen={submitSessionOpenAnswer}
+              onSelectMcqOption={selectSessionMcqOption}
+              onSubmitMcq={submitSessionMcqAnswer}
+              onAskGuidance={openSessionQuizChat}
+              onNextQuestion={handleNextSessionQuestion}
+              onEndSession={handleEndSession}
+              onAdjustFilters={() => {
+                setIsSessionFiltersOpen(true)
+              }}
+            />
           ) : null}
 
-          {!isLoadingDetail && !detailLoadError && !collection ? (
-            <section className="rounded-2xl border border-border bg-card p-8 text-center">
-              <p className="text-sm font-medium">Collection not found.</p>
-              <Button className="mt-4" asChild>
-                <Link to="/quiz/collections">Back to collections</Link>
-              </Button>
-            </section>
-          ) : null}
-
-          {collection ? (
+          {screen === 'detail' ? (
             <>
-              <section className="rounded-2xl border border-border bg-card p-6">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <h1 className="text-xl font-semibold tracking-tight">Collection metadata</h1>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      void refreshDetail()
-                    }}
-                    className="gap-2"
-                    disabled={isLoadingDetail}
-                  >
-                    <RefreshCw className={cn('size-4', isLoadingDetail ? 'animate-spin' : '')} />
-                    Refresh
+              {detailLoadError ? (
+                <section className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4">
+                  <p className="text-sm font-medium text-destructive">{detailLoadError}</p>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        void refreshDetail()
+                      }}
+                    >
+                      Retry
+                    </Button>
+                    <Button variant="ghost" asChild>
+                      <Link to="/quiz/collections">Back to collections</Link>
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
+
+              {isLoadingDetail && !collection ? (
+                <CollectionDetailLoadingState />
+              ) : null}
+
+              {!isLoadingDetail && !detailLoadError && !collection ? (
+                <section className="rounded-2xl border border-border bg-card p-8 text-center">
+                  <p className="text-sm font-medium">Collection not found.</p>
+                  <Button className="mt-4" asChild>
+                    <Link to="/quiz/collections">Back to collections</Link>
                   </Button>
-                </div>
+                </section>
+              ) : null}
 
-                <form className="space-y-4" onSubmit={(event) => {
-                  void handleSaveMetadata(event)
-                }}
-                >
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-2 text-sm font-medium">
-                      Name
-                      <input
-                        value={nameDraft}
-                        onChange={(event) => setNameDraft(event.target.value)}
-                        maxLength={120}
-                        disabled={isSavingMetadata || isDeletingCollection}
-                        className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
-                      />
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium">
-                      Description
-                      <textarea
-                        value={descriptionDraft}
-                        onChange={(event) => setDescriptionDraft(event.target.value)}
-                        maxLength={300}
-                        rows={3}
-                        disabled={isSavingMetadata || isDeletingCollection}
-                        className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
-                        placeholder="No description yet"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="submit" disabled={!canSaveMetadata} className="gap-2">
-                      {isSavingMetadata ? <Loader2 className="size-4 animate-spin" /> : null}
-                      Save changes
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      onClick={() => {
-                        void handleDeleteCollection()
-                      }}
-                      disabled={isDeletingCollection || isSavingMetadata}
-                      className="gap-2"
-                    >
-                      {isDeletingCollection ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="size-4" />
-                      )}
-                      Delete collection
-                    </Button>
-                  </div>
-                </form>
-
-                {metadataSaveError ? (
-                  <p className="mt-3 text-sm text-destructive" role="alert">{metadataSaveError}</p>
-                ) : null}
-
-                {deleteCollectionError ? (
-                  <p className="mt-3 text-sm text-destructive" role="alert">{deleteCollectionError}</p>
-                ) : null}
-              </section>
-
-              <section className="rounded-2xl border border-border bg-card p-6">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold tracking-tight">Questions</h2>
-                  <div className="flex items-center gap-2">
-                    <p className="text-muted-foreground text-sm">
-                      {questions.length} question{questions.length === 1 ? '' : 's'}
-                    </p>
-                    <Button
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => {
-                        setIsQuestionPickerOpen(true)
-                      }}
-                      disabled={isLoadingDetail}
-                    >
-                      <Plus className="size-4" />
-                      Add questions
-                    </Button>
-                  </div>
-                </div>
-
-                {removeQuestionError ? (
-                  <p className="mb-3 text-sm text-destructive" role="alert">{removeQuestionError}</p>
-                ) : null}
-
-                {questions.length === 0 ? (
-                  <EmptyQuestionsState />
-                ) : (
-                  <div className="space-y-2">
-                    {questions.map((question) => (
-                      <QuestionRow
-                        key={question.id}
-                        question={question}
-                        isEditing={updatingQuestionId === question.id}
-                        isRemoving={removingQuestionId === question.id}
-                        onEdit={() => {
-                          openQuestionEditor(question.id)
+              {collection ? (
+                <>
+                  <section className="rounded-2xl border border-border bg-card p-6">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <h1 className="text-xl font-semibold tracking-tight">Collection metadata</h1>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void refreshDetail()
                         }}
-                        onRemove={() => {
-                          void handleRemoveQuestion(question.id)
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
+                        className="gap-2"
+                        disabled={isLoadingDetail}
+                      >
+                        <RefreshCw className={cn('size-4', isLoadingDetail ? 'animate-spin' : '')} />
+                        Refresh
+                      </Button>
+                    </div>
+
+                    <form className="space-y-4" onSubmit={(event) => {
+                      void handleSaveMetadata(event)
+                    }}
+                    >
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="grid gap-2 text-sm font-medium">
+                          Name
+                          <input
+                            value={nameDraft}
+                            onChange={(event) => setNameDraft(event.target.value)}
+                            maxLength={120}
+                            disabled={isSavingMetadata || isDeletingCollection}
+                            className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+                          />
+                        </label>
+
+                        <label className="grid gap-2 text-sm font-medium">
+                          Description
+                          <textarea
+                            value={descriptionDraft}
+                            onChange={(event) => setDescriptionDraft(event.target.value)}
+                            maxLength={300}
+                            rows={3}
+                            disabled={isSavingMetadata || isDeletingCollection}
+                            className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                            placeholder="No description yet"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="submit" disabled={!canSaveMetadata} className="gap-2">
+                          {isSavingMetadata ? <Loader2 className="size-4 animate-spin" /> : null}
+                          Save changes
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={() => {
+                            void handleDeleteCollection()
+                          }}
+                          disabled={isDeletingCollection || isSavingMetadata}
+                          className="gap-2"
+                        >
+                          {isDeletingCollection ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                          Delete collection
+                        </Button>
+                      </div>
+                    </form>
+
+                    {metadataSaveError ? (
+                      <p className="mt-3 text-sm text-destructive" role="alert">{metadataSaveError}</p>
+                    ) : null}
+
+                    {deleteCollectionError ? (
+                      <p className="mt-3 text-sm text-destructive" role="alert">{deleteCollectionError}</p>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-2xl border border-border bg-card p-6">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <h2 className="text-lg font-semibold tracking-tight">Questions</h2>
+                      <div className="flex items-center gap-2">
+                        <p className="text-muted-foreground text-sm">
+                          {questions.length} question{questions.length === 1 ? '' : 's'}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          onClick={handleOpenSessionConfiguration}
+                          disabled={isLoadingDetail || questions.length === 0}
+                        >
+                          <Play className="size-4" />
+                          Start session
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => {
+                            setIsQuestionPickerOpen(true)
+                          }}
+                          disabled={isLoadingDetail}
+                        >
+                          <Plus className="size-4" />
+                          Add questions
+                        </Button>
+                      </div>
+                    </div>
+
+                    {removeQuestionError ? (
+                      <p className="mb-3 text-sm text-destructive" role="alert">{removeQuestionError}</p>
+                    ) : null}
+
+                    {questions.length === 0 ? (
+                      <EmptyQuestionsState />
+                    ) : (
+                      <div className="space-y-2">
+                        {questions.map((question) => (
+                          <QuestionRow
+                            key={question.id}
+                            question={question}
+                            isEditing={updatingQuestionId === question.id}
+                            isRemoving={removingQuestionId === question.id}
+                            onEdit={() => {
+                              openQuestionEditor(question.id)
+                            }}
+                            onRemove={() => {
+                              void handleRemoveQuestion(question.id)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -577,6 +870,13 @@ export function CollectionDetailPage() {
           void handleConfirmOrphanResolution()
         }}
       />
+
+      <QuizChatModal
+        open={isQuizChatOpen}
+        threadId={quizChatThreadId}
+        systemContext={quizChatSystemContext}
+        onClose={closeSessionQuizChat}
+      />
     </div>
   )
 }
@@ -612,6 +912,735 @@ function EmptyQuestionsState() {
       </p>
     </div>
   )
+}
+
+const SESSION_MASTERY_LEVEL_OPTIONS = [0, 1, 2, 3, 4, 5] as const
+
+interface SessionFilterChecklistProps {
+  selectedMasteryLevels: number[]
+  selectedDifficulties: number[]
+  availableDifficulties: number[]
+  disabled: boolean
+  onToggleMasteryLevel: (masteryLevel: number) => void
+  onToggleDifficulty: (difficulty: number) => void
+}
+
+function SessionFilterChecklist({
+  selectedMasteryLevels,
+  selectedDifficulties,
+  availableDifficulties,
+  disabled,
+  onToggleMasteryLevel,
+  onToggleDifficulty,
+}: SessionFilterChecklistProps) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="rounded-lg border border-border bg-background p-3">
+        <p className="text-sm font-medium">Mastery levels</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Select one or more levels from 0 to 5.
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {SESSION_MASTERY_LEVEL_OPTIONS.map((masteryLevel) => {
+            const isChecked = selectedMasteryLevels.includes(masteryLevel)
+
+            return (
+              <label key={masteryLevel} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  disabled={disabled}
+                  onChange={() => {
+                    onToggleMasteryLevel(masteryLevel)
+                  }}
+                />
+                <span>Level {masteryLevel}</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-background p-3">
+        <p className="text-sm font-medium">Difficulty values</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Filter by difficulty values in this collection.
+        </p>
+        {availableDifficulties.length === 0 ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            No difficulty values are available yet.
+          </p>
+        ) : (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {availableDifficulties.map((difficulty) => {
+              const isChecked = selectedDifficulties.includes(difficulty)
+
+              return (
+                <label key={difficulty} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    disabled={disabled}
+                    onChange={() => {
+                      onToggleDifficulty(difficulty)
+                    }}
+                  />
+                  <span>{difficulty}</span>
+                </label>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface SessionConfigurationScreenProps {
+  collectionName: string
+  questionCount: number
+  selectedMasteryLevels: number[]
+  selectedDifficulties: number[]
+  availableDifficulties: number[]
+  matchingQuestionCount: number
+  isLoading: boolean
+  isFiltersDisabled: boolean
+  error: string | null
+  canStart: boolean
+  onToggleMasteryLevel: (masteryLevel: number) => void
+  onToggleDifficulty: (difficulty: number) => void
+  onCancel: () => void
+  onStart: () => void
+}
+
+function SessionConfigurationScreen({
+  collectionName,
+  questionCount,
+  selectedMasteryLevels,
+  selectedDifficulties,
+  availableDifficulties,
+  matchingQuestionCount,
+  isLoading,
+  isFiltersDisabled,
+  error,
+  canStart,
+  onToggleMasteryLevel,
+  onToggleDifficulty,
+  onCancel,
+  onStart,
+}: SessionConfigurationScreenProps) {
+  const hasZeroMatches = !isLoading && matchingQuestionCount === 0
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-6">
+      <h1 className="text-xl font-semibold tracking-tight">Session configuration</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Choose filters before starting this practice session.
+      </p>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border bg-muted/20 p-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Collection
+          </p>
+          <p className="mt-1 text-sm font-semibold">{collectionName}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-muted/20 p-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Total questions
+          </p>
+          <p className="mt-1 text-sm font-semibold">
+            {questionCount} question{questionCount === 1 ? '' : 's'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <SessionFilterChecklist
+          selectedMasteryLevels={selectedMasteryLevels}
+          selectedDifficulties={selectedDifficulties}
+          availableDifficulties={availableDifficulties}
+          disabled={isFiltersDisabled}
+          onToggleMasteryLevel={onToggleMasteryLevel}
+          onToggleDifficulty={onToggleDifficulty}
+        />
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3">
+        <p className="text-sm font-medium">
+          {isLoading ? 'Updating matching question count...' : `${matchingQuestionCount} questions match`}
+        </p>
+        {hasZeroMatches ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Adjust mastery or difficulty filters to include at least one question.
+          </p>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+        <Button variant="ghost" onClick={onCancel} disabled={isLoading}>
+          Back to collection detail
+        </Button>
+        <Button
+          onClick={onStart}
+          disabled={!canStart}
+          className="gap-2"
+        >
+          {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          Start session
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+interface SessionQuestionScreenProps {
+  collectionName: string
+  question: QuizCollectionQuestion | null
+  mode: QuizMode
+  masteryLevel: number
+  answeredQuestionCount: number
+  remainingQuestionCount: number
+  matchingQuestionCount: number
+  answeredInSessionCount: number
+  selectedMasteryLevels: number[]
+  selectedDifficulties: number[]
+  availableDifficulties: number[]
+  isLoading: boolean
+  error: string | null
+  isFiltersOpen: boolean
+  isCompleted: boolean
+  openDraftAnswer: string
+  submittedOpenAnswer: string | null
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackGrade: number | null
+  feedbackError: string | null
+  selectedMcqOptionIndex: number | null
+  submittedMcqOptionIndex: number | null
+  isOpenSubmitted: boolean
+  isMcqSubmitted: boolean
+  canGoToNextQuestion: boolean
+  onToggleFiltersOpen: () => void
+  onToggleMasteryLevel: (masteryLevel: number) => void
+  onToggleDifficulty: (difficulty: number) => void
+  onChangeMode: (mode: QuizMode) => void
+  onOpenAnswerChange: (answer: string) => void
+  onSubmitOpen: () => void
+  onSelectMcqOption: (optionIndex: number) => void
+  onSubmitMcq: () => void
+  onAskGuidance: () => void
+  onNextQuestion: () => void
+  onEndSession: () => void
+  onAdjustFilters: () => void
+}
+
+function SessionQuestionScreen({
+  collectionName,
+  question,
+  mode,
+  masteryLevel,
+  answeredQuestionCount,
+  remainingQuestionCount,
+  matchingQuestionCount,
+  answeredInSessionCount,
+  selectedMasteryLevels,
+  selectedDifficulties,
+  availableDifficulties,
+  isLoading,
+  error,
+  isFiltersOpen,
+  isCompleted,
+  openDraftAnswer,
+  submittedOpenAnswer,
+  feedbackStatus,
+  feedbackText,
+  feedbackGrade,
+  feedbackError,
+  selectedMcqOptionIndex,
+  submittedMcqOptionIndex,
+  isOpenSubmitted,
+  isMcqSubmitted,
+  canGoToNextQuestion,
+  onToggleFiltersOpen,
+  onToggleMasteryLevel,
+  onToggleDifficulty,
+  onChangeMode,
+  onOpenAnswerChange,
+  onSubmitOpen,
+  onSelectMcqOption,
+  onSubmitMcq,
+  onAskGuidance,
+  onNextQuestion,
+  onEndSession,
+  onAdjustFilters,
+}: SessionQuestionScreenProps) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{collectionName} session</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {answeredQuestionCount} answered in this session, {remainingQuestionCount} remaining
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={onToggleFiltersOpen}
+            disabled={isLoading}
+          >
+            <SlidersHorizontal className="size-4" />
+            Filters
+          </Button>
+          <Button variant="destructive" size="sm" onClick={onEndSession}>
+            End session
+          </Button>
+        </div>
+      </div>
+
+      {isFiltersOpen ? (
+        <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4">
+          <SessionFilterChecklist
+            selectedMasteryLevels={selectedMasteryLevels}
+            selectedDifficulties={selectedDifficulties}
+            availableDifficulties={availableDifficulties}
+            disabled={isLoading}
+            onToggleMasteryLevel={onToggleMasteryLevel}
+            onToggleDifficulty={onToggleDifficulty}
+          />
+          <p className="mt-3 text-xs text-muted-foreground">
+            {isLoading
+              ? 'Updating filters...'
+              : `${matchingQuestionCount} matching, ${remainingQuestionCount} remaining in this session`}
+          </p>
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mt-4 text-sm text-destructive" role="alert">{error}</p>
+      ) : null}
+
+      {isCompleted ? (
+        <SessionCompletionScreen
+          answeredInSessionCount={answeredInSessionCount}
+          onAdjustFilters={onAdjustFilters}
+          onEndSession={onEndSession}
+        />
+      ) : question ? (
+        <SessionQuestionCard
+          question={question}
+          mode={mode}
+          masteryLevel={masteryLevel}
+          openDraftAnswer={openDraftAnswer}
+          submittedOpenAnswer={submittedOpenAnswer}
+          feedbackStatus={feedbackStatus}
+          feedbackText={feedbackText}
+          feedbackGrade={feedbackGrade}
+          feedbackError={feedbackError}
+          selectedMcqOptionIndex={selectedMcqOptionIndex}
+          submittedMcqOptionIndex={submittedMcqOptionIndex}
+          isOpenSubmitted={isOpenSubmitted}
+          isMcqSubmitted={isMcqSubmitted}
+          canGoToNextQuestion={canGoToNextQuestion}
+          onChangeMode={onChangeMode}
+          onOpenAnswerChange={onOpenAnswerChange}
+          onSubmitOpen={onSubmitOpen}
+          onSelectMcqOption={onSelectMcqOption}
+          onSubmitMcq={onSubmitMcq}
+          onAskGuidance={onAskGuidance}
+          onNextQuestion={onNextQuestion}
+        />
+      ) : (
+        <div className="mt-4 rounded-xl border border-border bg-muted/15 p-6 text-center">
+          <p className="text-sm font-medium">Preparing your next question...</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            If this takes too long, adjust filters or end the session.
+          </p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+interface SessionCompletionScreenProps {
+  answeredInSessionCount: number
+  onAdjustFilters: () => void
+  onEndSession: () => void
+}
+
+function SessionCompletionScreen({
+  answeredInSessionCount,
+  onAdjustFilters,
+  onEndSession,
+}: SessionCompletionScreenProps) {
+  return (
+    <div className="mt-5 rounded-xl border border-border bg-muted/20 p-6 text-center">
+      <h2 className="text-lg font-semibold tracking-tight">All matching questions answered</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        You answered {answeredInSessionCount} question{answeredInSessionCount === 1 ? '' : 's'} in this session.
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Adjust filters to unlock more questions or end this session.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <Button variant="outline" onClick={onAdjustFilters} className="gap-2">
+          <SlidersHorizontal className="size-4" />
+          Adjust filters
+        </Button>
+        <Button variant="destructive" onClick={onEndSession}>
+          End session
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+interface SessionQuestionCardProps {
+  question: QuizCollectionQuestion
+  mode: QuizMode
+  masteryLevel: number
+  openDraftAnswer: string
+  submittedOpenAnswer: string | null
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackGrade: number | null
+  feedbackError: string | null
+  selectedMcqOptionIndex: number | null
+  submittedMcqOptionIndex: number | null
+  isOpenSubmitted: boolean
+  isMcqSubmitted: boolean
+  canGoToNextQuestion: boolean
+  onChangeMode: (mode: QuizMode) => void
+  onOpenAnswerChange: (answer: string) => void
+  onSubmitOpen: () => void
+  onSelectMcqOption: (optionIndex: number) => void
+  onSubmitMcq: () => void
+  onAskGuidance: () => void
+  onNextQuestion: () => void
+}
+
+function SessionQuestionCard({
+  question,
+  mode,
+  masteryLevel,
+  openDraftAnswer,
+  submittedOpenAnswer,
+  feedbackStatus,
+  feedbackText,
+  feedbackGrade,
+  feedbackError,
+  selectedMcqOptionIndex,
+  submittedMcqOptionIndex,
+  isOpenSubmitted,
+  isMcqSubmitted,
+  canGoToNextQuestion,
+  onChangeMode,
+  onOpenAnswerChange,
+  onSubmitOpen,
+  onSelectMcqOption,
+  onSubmitMcq,
+  onAskGuidance,
+  onNextQuestion,
+}: SessionQuestionCardProps) {
+  const prompt = mode === 'open' ? question.question : question.mcqQuestion
+  const canSubmitOpen = openDraftAnswer.trim().length > 0 && !isOpenSubmitted
+  const canSubmitMcq = selectedMcqOptionIndex !== null && !isMcqSubmitted
+  const isMcqAnswerCorrect = submittedMcqOptionIndex !== null
+    ? Boolean(question.mcqOptions[submittedMcqOptionIndex]?.is_correct)
+    : null
+
+  return (
+    <div className="mt-5 rounded-xl border border-border bg-background p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <MasteryLevelPill masteryLevel={masteryLevel} />
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            Subject: {question.subject} · Difficulty: {question.difficulty}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
+            <SessionModeButton isActive={mode === 'open'} onClick={() => onChangeMode('open')}>
+              Ouverte
+            </SessionModeButton>
+            <SessionModeButton isActive={mode === 'mcq'} onClick={() => onChangeMode('mcq')}>
+              QCM
+            </SessionModeButton>
+          </div>
+          <Button variant="outline" size="sm" onClick={onAskGuidance} className="gap-2">
+            <MessageCircle className="size-4" />
+            Ask guidance to AI
+          </Button>
+        </div>
+      </div>
+
+      <h2 className="mt-4 text-xl font-semibold tracking-tight">{prompt}</h2>
+
+      {mode === 'open' ? (
+        <div className="mt-4 space-y-3">
+          <textarea
+            className="min-h-40 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-80"
+            placeholder="Write your answer..."
+            value={openDraftAnswer}
+            disabled={isOpenSubmitted}
+            onChange={(event) => {
+              onOpenAnswerChange(event.currentTarget.value)
+            }}
+          />
+          <Button className="w-full sm:w-auto" onClick={onSubmitOpen} disabled={!canSubmitOpen}>
+            {isOpenSubmitted ? 'Submitted' : 'Submit'}
+          </Button>
+
+          {submittedOpenAnswer !== null ? (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Your answer
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{submittedOpenAnswer}</p>
+              </div>
+
+              <SessionOpenAnswerFeedbackSection
+                feedbackStatus={feedbackStatus}
+                feedbackText={feedbackText}
+                feedbackGrade={feedbackGrade}
+                feedbackError={feedbackError}
+              />
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Complete answer
+                </p>
+                <MarkdownText density="compact" className="mt-1 text-sm">
+                  {question.completeAnswer}
+                </MarkdownText>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {question.mcqOptions.map((option, index) => {
+            const isSelected = selectedMcqOptionIndex === index
+            const isSubmitted = submittedMcqOptionIndex !== null
+            const isCorrect = option.is_correct
+            const isIncorrectSelection = isSubmitted && isSelected && !isCorrect
+
+            return (
+              <button
+                key={`${option.option}-${index}`}
+                type="button"
+                onClick={() => onSelectMcqOption(index)}
+                disabled={isMcqSubmitted}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-lg border px-3 py-3 text-left text-sm transition-colors',
+                  'disabled:cursor-not-allowed',
+                  isSubmitted && isCorrect && 'border-emerald-500/60 bg-emerald-500/10 text-emerald-700',
+                  isIncorrectSelection && 'border-destructive/60 bg-destructive/10 text-destructive',
+                  !isSubmitted && isSelected && 'border-[#2F6868]/60 bg-[#2F6868]/10',
+                  !isSubmitted && !isSelected && 'border-input bg-background hover:bg-accent hover:text-accent-foreground',
+                  isSubmitted && !isCorrect && !isSelected && 'border-input bg-background/70 text-muted-foreground',
+                )}
+              >
+                <SessionMcqOptionIcon
+                  isSelected={isSelected}
+                  isSubmitted={isSubmitted}
+                  isCorrect={isCorrect}
+                />
+                <span>{option.option}</span>
+              </button>
+            )
+          })}
+
+          <Button className="w-full sm:w-auto" onClick={onSubmitMcq} disabled={!canSubmitMcq}>
+            <CheckCircle2 className="size-4" />
+            {isMcqSubmitted ? 'Submitted' : 'Submit'}
+          </Button>
+
+          {isMcqSubmitted ? (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+              <p
+                className={cn(
+                  'text-sm font-medium',
+                  isMcqAnswerCorrect ? 'text-emerald-600' : 'text-destructive',
+                )}
+              >
+                {isMcqAnswerCorrect ? 'Correct answer.' : 'Incorrect answer.'}
+              </p>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Complete answer
+                </p>
+                <MarkdownText density="compact" className="mt-1 text-sm">
+                  {question.completeAnswer}
+                </MarkdownText>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      <div className="mt-6 flex items-center justify-end border-t border-border pt-4">
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={onNextQuestion}
+          disabled={!canGoToNextQuestion}
+        >
+          Next question
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+interface SessionOpenAnswerFeedbackSectionProps {
+  feedbackStatus: QuizFeedbackStatus
+  feedbackText: string | null
+  feedbackGrade: number | null
+  feedbackError: string | null
+}
+
+function SessionOpenAnswerFeedbackSection({
+  feedbackStatus,
+  feedbackText,
+  feedbackGrade,
+  feedbackError,
+}: SessionOpenAnswerFeedbackSectionProps) {
+  if (feedbackStatus === 'idle') {
+    return null
+  }
+
+  if (feedbackStatus === 'loading') {
+    return (
+      <div className="rounded-lg border border-border bg-background/70 p-3" aria-live="polite">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          AI feedback
+        </p>
+        <div className="mt-2 space-y-2">
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Generating feedback...
+          </p>
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+        </div>
+      </div>
+    )
+  }
+
+  if (feedbackStatus === 'error') {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3" role="status">
+        <p className="text-xs font-medium uppercase tracking-wide text-destructive">
+          AI feedback
+        </p>
+        <p className="mt-1 whitespace-pre-wrap text-sm text-destructive">
+          {feedbackError ?? 'Feedback is unavailable for this answer. You can continue the quiz.'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-background/70 p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        AI feedback
+      </p>
+      <SessionAttemptGradeIndicator grade={feedbackGrade} />
+      <MarkdownText density="compact" className="mt-1 text-sm">
+        {feedbackText || 'No feedback available.'}
+      </MarkdownText>
+    </div>
+  )
+}
+
+interface SessionAttemptGradeIndicatorProps {
+  grade: number | null
+}
+
+function SessionAttemptGradeIndicator({ grade }: SessionAttemptGradeIndicatorProps) {
+  if (grade === null) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        Grade unavailable for this attempt.
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2" aria-label={`Grade ${grade} out of 5`}>
+      <span className="text-sm font-semibold text-[#2F6868]">{grade}/5</span>
+      <div className="flex items-center gap-1">
+        {Array.from({ length: 5 }, (_, index) => (
+          <span
+            key={index}
+            className={cn(
+              'h-2 w-2 rounded-full',
+              index < grade ? 'bg-[#2F6868]' : 'bg-muted-foreground/25',
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+interface SessionModeButtonProps {
+  isActive: boolean
+  onClick: () => void
+  children: string
+}
+
+function SessionModeButton({ isActive, onClick, children }: SessionModeButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+        isActive
+          ? 'bg-background text-foreground shadow-xs'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+interface SessionMcqOptionIconProps {
+  isSelected: boolean
+  isSubmitted: boolean
+  isCorrect: boolean
+}
+
+function SessionMcqOptionIcon({
+  isSelected,
+  isSubmitted,
+  isCorrect,
+}: SessionMcqOptionIconProps) {
+  if (isSubmitted && isCorrect) {
+    return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+  }
+
+  if (isSubmitted && isSelected && !isCorrect) {
+    return <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+  }
+
+  if (!isSubmitted && isSelected) {
+    return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[#2F6868]" />
+  }
+
+  return <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
 }
 
 interface QuestionRowProps {
