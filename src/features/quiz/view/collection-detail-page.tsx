@@ -126,7 +126,6 @@ export function CollectionDetailPage() {
   const {
     collectionId: sessionCollectionId,
     draftFilters: sessionDraftFilters,
-    answeredInSession,
     currentQuestion: sessionCurrentQuestion,
     sessionActive,
     availableDifficulties,
@@ -518,6 +517,9 @@ export function CollectionDetailPage() {
     matchingQuestionCount === 0
     || isSessionPoolLoading
     || availableDifficulties.length === 0
+  const answeredQuestionCountForDisplay =
+    answeredQuestionCount
+    + (sessionCurrentQuestion && canGoToNextQuestion ? 1 : 0)
 
   if (!collectionId) {
     return (
@@ -613,10 +615,10 @@ export function CollectionDetailPage() {
               question={sessionCurrentQuestion}
               mode={sessionMode}
               masteryLevel={sessionMasteryLevel}
-              answeredQuestionCount={answeredQuestionCount}
+              answeredQuestionCount={answeredQuestionCountForDisplay}
               remainingQuestionCount={remainingQuestionCount}
               matchingQuestionCount={matchingQuestionCount}
-              answeredInSessionCount={answeredInSession.length}
+              answeredInSessionCount={answeredQuestionCountForDisplay}
               selectedMasteryLevels={sessionDraftFilters.mastery}
               selectedDifficulties={sessionDraftFilters.difficulty}
               availableDifficulties={availableDifficulties}

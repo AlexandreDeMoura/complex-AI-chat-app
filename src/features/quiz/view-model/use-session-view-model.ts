@@ -427,7 +427,7 @@ export function useSessionViewModel({
 
       setSessionActive(true)
       setCurrentQuestionId(firstSelection.questionId)
-      setAnsweredInSession([firstSelection.questionId])
+      setAnsweredInSession([])
       setPool(firstSelection.remainingPool)
       return true
     } catch (error) {
@@ -555,6 +555,16 @@ export function useSessionViewModel({
     }
 
     setPool((currentPool) => {
+      if (currentQuestionId) {
+        setAnsweredInSession((currentAnswered) => {
+          if (currentAnswered.includes(currentQuestionId)) {
+            return currentAnswered
+          }
+
+          return [...currentAnswered, currentQuestionId]
+        })
+      }
+
       const nextSelection = pickRandomQuestionId(currentPool)
       if (!nextSelection) {
         setCurrentQuestionId(null)
@@ -562,17 +572,9 @@ export function useSessionViewModel({
       }
 
       setCurrentQuestionId(nextSelection.questionId)
-      setAnsweredInSession((currentAnswered) => {
-        if (currentAnswered.includes(nextSelection.questionId)) {
-          return currentAnswered
-        }
-
-        return [...currentAnswered, nextSelection.questionId]
-      })
-
       return nextSelection.remainingPool
     })
-  }, [sessionActive])
+  }, [currentQuestionId, sessionActive])
 
   return useMemo<SessionViewModel>(() => ({
     collectionId,
