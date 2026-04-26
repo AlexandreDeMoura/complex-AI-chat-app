@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   createQuizCollection,
   fetchFeedback,
-  listQuizCollectionQuestions,
   listQuizCollections,
   parseQuizUploadFile,
   persistQuizQuestionsBulk,
@@ -10,7 +9,6 @@ import {
   QuizApiError,
 } from '@/features/quiz/data'
 import type {
-  QuizCollectionQuestion,
   QuizCollectionSummary,
   QuizFeedbackState,
   QuizFeedbackStatus,
@@ -88,19 +86,6 @@ function buildUploadReviewCollections(
     .sort((left, right) => left.subject.localeCompare(right.subject))
 }
 
-function mapCollectionQuestionToSessionQuestion(question: QuizCollectionQuestion): QuizSessionQuestion {
-  return {
-    id: question.id,
-    question: question.question,
-    mcq_question: question.mcqQuestion,
-    complete_answer: question.completeAnswer,
-    mcq_options: question.mcqOptions,
-    subject: question.subject,
-    difficulty: question.difficulty,
-    masteryLevel: question.masteryLevel,
-  }
-}
-
 // Shuffle MCQ options once per quiz session so the correct answer isn't always in the same slot,
 // but remains stable as the user navigates back and forth between questions within the session.
 function shuffleSessionQuestionMcqOptions(questions: QuizSessionQuestion[]): QuizSessionQuestion[] {
@@ -136,13 +121,8 @@ export interface QuizViewModel {
   screen: QuizScreen
   mode: QuizMode
   isUploading: boolean
-  isLoadingStartCollections: boolean
-  isStartingFromCollection: boolean
   isLoadingReviewCollections: boolean
   uploadError: QuizUploadError | null
-  startCollectionError: string | null
-  startCollections: QuizCollectionSummary[]
-  selectedStartCollectionId: string | null
   reviewCollections: QuizUploadReviewCollection[]
   reviewMergeMode: QuizUploadReviewMergeMode
   reviewExistingCollections: QuizCollectionSummary[]
@@ -180,9 +160,6 @@ export interface QuizViewModel {
   goToPreviousQuestion: () => void
   goToNextQuestion: () => void
   uploadQuizFile: (file: File | null) => Promise<void>
-  setSelectedStartCollectionId: (collectionId: string | null) => void
-  refreshStartCollections: () => Promise<void>
-  startQuizFromCollection: () => Promise<void>
   setReviewCollectionName: (subject: string, collectionName: string) => void
   setReviewMergeMode: (mode: QuizUploadReviewMergeMode) => void
   setReviewExistingCollectionId: (collectionId: string | null) => void
@@ -200,11 +177,6 @@ export interface QuizViewModel {
 
 export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewModel {
   const [screen, setScreen] = useState<QuizScreen>('upload')
-  const [startCollections, setStartCollections] = useState<QuizCollectionSummary[]>([])
-  const [selectedStartCollectionId, setSelectedStartCollectionId] = useState<string | null>(null)
-  const [isLoadingStartCollections, setIsLoadingStartCollections] = useState(false)
-  const [isStartingFromCollection, setIsStartingFromCollection] = useState(false)
-  const [startCollectionError, setStartCollectionError] = useState<string | null>(null)
   const [reviewQuestions, setReviewQuestions] = useState<QuizQuestion[]>([])
   const [reviewCollectionNamesBySubject, setReviewCollectionNamesBySubject] = useState<Record<string, string>>({})
   const [reviewMergeMode, setReviewMergeMode] = useState<QuizUploadReviewMergeMode>('subject')
@@ -254,7 +226,6 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     setQuizChatThreadId(null)
     setQuizChatSystemContext(null)
     setScreen('upload')
-    setStartCollectionError(null)
     setReviewQuestions([])
     setReviewCollectionNamesBySubject({})
     setReviewMergeMode('subject')
@@ -403,102 +374,6 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
       setIsLoadingReviewCollections(false)
     }
   }, [accessToken])
-
-  const setSelectedStartCollectionIdValue = useCallback((collectionId: string | null) => {
-    const normalizedCollectionId = typeof collectionId === 'string' ? collectionId.trim() : ''
-    setStartCollectionError(null)
-    setSelectedStartCollectionId(normalizedCollectionId || null)
-  }, [])
-
-  const refreshStartCollections = useCallback(async () => {
-    if (!accessToken) {
-      setStartCollections([])
-      setSelectedStartCollectionId(null)
-      setStartCollectionError(QUIZ_AUTH_ERROR_MESSAGE)
-      return
-    }
-
-    setIsLoadingStartCollections(true)
-    setStartCollectionError(null)
-
-    try {
-      const collections = await listQuizCollections(accessToken)
-      setStartCollections(collections)
-      setSelectedStartCollectionId((currentCollectionId) => {
-        if (currentCollectionId && collections.some((collection) => collection.id === currentCollectionId)) {
-          return currentCollectionId
-        }
-
-        return collections.find((collection) => collection.questionCount > 0)?.id
-          ?? collections[0]?.id
-          ?? null
-      })
-    } catch (error) {
-      if (error instanceof QuizApiError) {
-        const message = error.statusCode === 401
-          ? QUIZ_AUTH_ERROR_MESSAGE
-          : error.message
-        setStartCollectionError(message)
-      } else {
-        setStartCollectionError('Unable to load quiz collections right now.')
-      }
-
-      setStartCollections([])
-      setSelectedStartCollectionId(null)
-    } finally {
-      setIsLoadingStartCollections(false)
-    }
-  }, [accessToken])
-
-  const startQuizFromCollection = useCallback(async () => {
-    if (!accessToken) {
-      setStartCollectionError(QUIZ_AUTH_ERROR_MESSAGE)
-      return
-    }
-
-    if (!selectedStartCollectionId) {
-      setStartCollectionError('Select a collection to start.')
-      return
-    }
-
-    setIsStartingFromCollection(true)
-    setStartCollectionError(null)
-    setUploadError(null)
-
-    try {
-      const collectionQuestions = await listQuizCollectionQuestions({
-        accessToken,
-        collectionId: selectedStartCollectionId,
-      })
-
-      if (collectionQuestions.length === 0) {
-        setStartCollectionError('This collection has no questions to start a quiz.')
-        return
-      }
-
-      startQuizSession(collectionQuestions.map(mapCollectionQuestionToSessionQuestion))
-    } catch (error) {
-      if (error instanceof QuizApiError) {
-        const message = error.statusCode === 401
-          ? QUIZ_AUTH_ERROR_MESSAGE
-          : error.message
-        setStartCollectionError(message)
-        return
-      }
-
-      setStartCollectionError('Unable to start a quiz from this collection right now.')
-    } finally {
-      setIsStartingFromCollection(false)
-    }
-  }, [accessToken, selectedStartCollectionId, startQuizSession])
-
-  useEffect(() => {
-    if (screen !== 'upload') {
-      return
-    }
-
-    void refreshStartCollections()
-  }, [refreshStartCollections, screen])
 
   const uploadQuizFile = useCallback(async (file: File | null) => {
     if (!file) {
@@ -1152,13 +1027,8 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     screen,
     mode,
     isUploading,
-    isLoadingStartCollections,
-    isStartingFromCollection,
     isLoadingReviewCollections,
     uploadError,
-    startCollectionError,
-    startCollections,
-    selectedStartCollectionId,
     reviewCollections,
     reviewMergeMode,
     reviewExistingCollections,
@@ -1196,9 +1066,6 @@ export function useQuizState({ accessToken }: UseQuizStateOptions): QuizViewMode
     goToPreviousQuestion,
     goToNextQuestion,
     uploadQuizFile,
-    setSelectedStartCollectionId: setSelectedStartCollectionIdValue,
-    refreshStartCollections,
-    startQuizFromCollection,
     setReviewCollectionName,
     setReviewMergeMode: setReviewMergeModeValue,
     setReviewExistingCollectionId: setReviewExistingCollectionIdValue,
